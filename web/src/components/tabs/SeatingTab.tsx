@@ -366,16 +366,20 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
     [],
   );
 
-  // Refs for values used in document-level listeners
+  // Refs for values used in document-level listeners (avoids stale closures)
   const isPanningRef = useRef(false);
   const toolModeRef = useRef(toolMode);
   const paintModeRef = useRef(paintMode);
   const paintZoneRef = useRef(paintZone);
   const seatsRef = useRef(seats);
+  const selRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   useEffect(() => { toolModeRef.current = toolMode; }, [toolMode]);
   useEffect(() => { paintModeRef.current = paintMode; }, [paintMode]);
   useEffect(() => { paintZoneRef.current = paintZone; }, [paintZone]);
   useEffect(() => { seatsRef.current = seats; }, [seats]);
+  // Stable ref for mutate so document listeners don't depend on mutation object
+  const bulkMutateRef = useRef(bulkUpdateMutation.mutate);
+  useEffect(() => { bulkMutateRef.current = bulkUpdateMutation.mutate; }, [bulkUpdateMutation.mutate]);
 
   // Helper: find seats in a selection rect
   const findSeatsInRect = useCallback(
@@ -422,14 +426,18 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
       if (paintModeRef.current || toolModeRef.current === 'select') {
         const pt = svgPoint(e.clientX, e.clientY);
         selStart.current = pt;
-        setSelRect({ x: pt.x, y: pt.y, w: 0, h: 0 });
+        const initRect = { x: pt.x, y: pt.y, w: 0, h: 0 };
+        selRectRef.current = initRect;
+        setSelRect(initRect);
         setDragSelectedIds(new Set());
       }
     },
     [svgPoint],
   );
 
-  // Document-level move / up so drag continues outside SVG
+  // Document-level move / up so drag continues outside SVG.
+  // All state is read via refs — zero dependency on React state objects,
+  // so this effect registers listeners exactly once.
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (isPanningRef.current) {
@@ -449,6 +457,7 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
           w: Math.abs(pt.x - sx),
           h: Math.abs(pt.y - sy),
         };
+        selRectRef.current = newRect;
         setSelRect(newRect);
         // Live preview: highlight seats inside rect
         if (newRect.w > 2 || newRect.h > 2) {
@@ -465,27 +474,28 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
         return;
       }
       if (selStart.current) {
-        // Read latest selRect via setState callback (closure-free)
-        setSelRect((currentRect) => {
-          if (currentRect && (currentRect.w > 3 || currentRect.h > 3)) {
-            const selected = findSeatsInRect(currentRect);
-            if (selected.length > 0) {
-              if (paintModeRef.current) {
-                // Paint mode: apply zone to selected seats
-                bulkUpdateMutation.mutate({
-                  seat_ids: selected.map((s) => s.id),
-                  zone: paintZoneRef.current || null,
-                });
-                setDragSelectedIds(new Set());
-              } else {
-                // Select mode: keep them highlighted (user can then paint or assign)
-                setDragSelectedIds(new Set(selected.map((s) => s.id)));
-              }
+        // Read final rect from ref (not from React state — avoids stale closure)
+        const finalRect = selRectRef.current;
+        if (finalRect && (finalRect.w > 3 || finalRect.h > 3)) {
+          const selected = findSeatsInRect(finalRect);
+          if (selected.length > 0) {
+            if (paintModeRef.current) {
+              // Paint mode: apply zone to selected seats
+              bulkMutateRef.current({
+                seat_ids: selected.map((s) => s.id),
+                zone: paintZoneRef.current || null,
+              });
+              setDragSelectedIds(new Set());
+            } else {
+              // Select mode: keep highlighted so user can pick a zone
+              setDragSelectedIds(new Set(selected.map((s) => s.id)));
             }
           }
-          return null; // clear rect
-        });
+        }
+        // Clean up
         selStart.current = null;
+        selRectRef.current = null;
+        setSelRect(null);
       }
     };
 
@@ -495,7 +505,7 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
     };
-  }, [svgPoint, setPan, findSeatsInRect, bulkUpdateMutation]);
+  }, [svgPoint, setPan, findSeatsInRect]);
 
   // ── Zoom: native wheel listener (non-passive) + zoom toward cursor ──
   useEffect(() => {
