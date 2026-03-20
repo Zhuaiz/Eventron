@@ -80,7 +80,7 @@ class TestIdentityService:
             name = "张三"
             title = "总经理"
             organization = "Acme"
-            role = "vip"
+            role = "甲方嘉宾"
             event_id = uuid.uuid4()
             event = FakeEvent()
 
@@ -105,7 +105,7 @@ class TestIdentityService:
             name = "李四"
             title = "副总"
             organization = "Beta"
-            role = "attendee"
+            role = "参会者"
             event_id = uuid.uuid4()
             event = FakeEvent()
 

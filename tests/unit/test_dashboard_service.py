@@ -10,9 +10,10 @@ from app.services.exceptions import EventNotFoundError
 
 
 class FakeAttendee:
-    def __init__(self, role="attendee", status="confirmed"):
+    def __init__(self, role="参会者", status="confirmed", priority=0):
         self.role = role
         self.status = status
+        self.priority = priority
 
 
 class FakeSeat:
@@ -20,8 +21,8 @@ class FakeSeat:
         self.attendee_id = attendee_id
 
 
-def _make_attendee(role="attendee", status="confirmed"):
-    return FakeAttendee(role=role, status=status)
+def _make_attendee(role="参会者", status="confirmed", priority=0):
+    return FakeAttendee(role=role, status=status, priority=priority)
 
 
 def _make_seat(attendee_id=None):
@@ -56,10 +57,10 @@ class TestDashboardService:
         mock_event.status = "active"
         repos["event_repo"].get_by_id.return_value = mock_event
         repos["attendee_repo"].get_by_event.return_value = [
-            _make_attendee("attendee", "confirmed"),
-            _make_attendee("vip", "checked_in"),
-            _make_attendee("speaker", "checked_in"),
-            _make_attendee("attendee", "pending"),
+            _make_attendee("参会者", "confirmed", priority=0),
+            _make_attendee("甲方嘉宾", "checked_in", priority=15),
+            _make_attendee("演讲嘉宾", "checked_in", priority=10),
+            _make_attendee("参会者", "pending", priority=0),
         ]
         repos["seat_repo"].get_by_event.return_value = [
             _make_seat(uuid.uuid4()),
@@ -87,9 +88,9 @@ class TestDashboardService:
         assert stats["seats_available"] == 3
         assert stats["seat_utilization_rate"] == 0.4
         assert stats["pending_approvals"] == 2
-        assert stats["vip_count"] == 1
-        assert stats["speaker_count"] == 1
-        assert stats["vip_checked_in"] == 2
+        assert stats["high_priority_count"] == 2  # priority >= 10: 甲方嘉宾(15) + 演讲嘉宾(10)
+        assert stats["mid_priority_count"] == 0   # 1 <= priority < 10: none
+        assert stats["vip_checked_in"] == 2        # priority >= 1 + checked_in
 
     async def test_empty_event(self, svc, repos):
         mock_event = AsyncMock()

@@ -9,19 +9,27 @@ interface AddAttendeeModalProps {
   onClose: () => void;
 }
 
-const ROLES = [
-  { value: 'attendee', label: '参会者' },
-  { value: 'vip', label: 'VIP' },
-  { value: 'speaker', label: '演讲者' },
-  { value: 'organizer', label: '组织者' },
-  { value: 'staff', label: '工作人员' },
+const ROLE_PRESETS = [
+  '参会者', '甲方嘉宾', '演讲嘉宾', '合作伙伴', '媒体',
+  '工作人员', '组织方', '投资人', '客户代表',
+];
+
+const PRIORITY_PRESETS: { label: string; value: number }[] = [
+  { label: '普通 (0)', value: 0 },
+  { label: '工作人员 (1)', value: 1 },
+  { label: '嘉宾 (5)', value: 5 },
+  { label: '重要嘉宾 (10)', value: 10 },
+  { label: '贵宾 (15)', value: 15 },
+  { label: '最高优先 (20)', value: 20 },
 ];
 
 export function AddAttendeeModal({ eventId, isOpen, onClose }: AddAttendeeModalProps) {
   const [name, setName] = useState('');
   const [title, setTitle] = useState('');
   const [organization, setOrganization] = useState('');
-  const [role, setRole] = useState('attendee');
+  const [role, setRole] = useState('参会者');
+  const [customRole, setCustomRole] = useState('');
+  const [priority, setPriority] = useState(0);
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
@@ -30,14 +38,16 @@ export function AddAttendeeModal({ eventId, isOpen, onClose }: AddAttendeeModalP
 
   const createMutation = useMutation({
     mutationFn: async () => {
+      const finalRole = role === '__custom__' ? customRole : role;
       return apiClient.createAttendee(eventId, {
         name,
         title: title || undefined,
         organization: organization || undefined,
-        role,
+        role: finalRole,
+        priority,
         phone: phone || undefined,
         email: email || undefined,
-      });
+      } as any);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['attendees'] });
@@ -54,7 +64,9 @@ export function AddAttendeeModal({ eventId, isOpen, onClose }: AddAttendeeModalP
     setName('');
     setTitle('');
     setOrganization('');
-    setRole('attendee');
+    setRole('参会者');
+    setCustomRole('');
+    setPriority(0);
     setPhone('');
     setEmail('');
     setError('');
@@ -67,6 +79,10 @@ export function AddAttendeeModal({ eventId, isOpen, onClose }: AddAttendeeModalP
       setError('请填写参会人姓名');
       return;
     }
+    if (role === '__custom__' && !customRole.trim()) {
+      setError('请填写自定义角色');
+      return;
+    }
     createMutation.mutate();
   };
 
@@ -74,7 +90,7 @@ export function AddAttendeeModal({ eventId, isOpen, onClose }: AddAttendeeModalP
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg shadow-lg max-w-md w-full">
+      <div className="bg-white rounded-lg shadow-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <h2 className="text-xl font-bold text-gray-900">添加参会人</h2>
@@ -130,22 +146,62 @@ export function AddAttendeeModal({ eventId, isOpen, onClose }: AddAttendeeModalP
             />
           </div>
 
-          {/* Role */}
+          {/* Role — free-text with presets */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              角色
+              角色标签
             </label>
             <select
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
+              value={ROLE_PRESETS.includes(role) ? role : '__custom__'}
+              onChange={(e) => {
+                setRole(e.target.value);
+                if (e.target.value !== '__custom__') setCustomRole('');
+              }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
-              {ROLES.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
-                </option>
+              {ROLE_PRESETS.map((r) => (
+                <option key={r} value={r}>{r}</option>
               ))}
+              <option value="__custom__">自定义...</option>
             </select>
+            {(role === '__custom__' || !ROLE_PRESETS.includes(role)) && (
+              <input
+                type="text"
+                value={customRole}
+                onChange={(e) => setCustomRole(e.target.value)}
+                className="w-full mt-2 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="输入自定义角色名称"
+              />
+            )}
+          </div>
+
+          {/* Priority */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              优先级
+              <span className="ml-2 text-xs text-gray-400">
+                (数字越大 = 座位越靠前)
+              </span>
+            </label>
+            <div className="flex items-center gap-3">
+              <select
+                value={priority}
+                onChange={(e) => setPriority(Number(e.target.value))}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {PRIORITY_PRESETS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={priority}
+                onChange={(e) => setPriority(Math.min(100, Math.max(0, Number(e.target.value))))}
+                className="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-center"
+              />
+            </div>
           </div>
 
           {/* Phone */}

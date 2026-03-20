@@ -25,7 +25,9 @@ class Seat(Base, UUIDMixin):
     col_num: Mapped[int] = mapped_column(Integer)
     label: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     seat_type: Mapped[str] = mapped_column(String(20), default="normal")
-    # normal | vip | reserved | disabled | aisle
+    # normal | reserved | disabled | aisle
+    zone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # Venue zone (e.g. "VIP区", "嘉宾区", "工作人员区", None=普通区)
     attendee_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("attendees.id"), nullable=True
     )

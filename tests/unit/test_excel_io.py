@@ -81,7 +81,7 @@ class TestExportAttendees:
 
     def test_export_basic(self):
         """Export produces valid xlsx bytes."""
-        attendees = [{"name": "张三", "title": "CEO", "role": "vip"}]
+        attendees = [{"name": "张三", "title": "CEO", "role": "甲方嘉宾"}]
         result = export_attendees_to_excel(attendees)
         assert isinstance(result, bytes)
         assert len(result) > 0
@@ -97,7 +97,7 @@ class TestExportAttendees:
         """Export then import should preserve names."""
         attendees = [
             {"name": "张三", "title": "CEO", "organization": "Acme",
-             "department": "管理", "role": "vip", "phone": "138", "email": "a@b.com",
+             "department": "管理", "role": "甲方嘉宾", "phone": "138", "email": "a@b.com",
              "status": "confirmed"},
         ]
         xlsx_bytes = export_attendees_to_excel(attendees)

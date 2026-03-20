@@ -42,11 +42,12 @@ class DashboardService:
         confirmed_count = sum(1 for a in attendees if a.status == "confirmed")
         absent_count = sum(1 for a in attendees if a.status == "absent")
         cancelled_count = sum(1 for a in attendees if a.status == "cancelled")
-        vip_list = [a for a in attendees if a.role == "vip"]
-        speaker_list = [a for a in attendees if a.role == "speaker"]
+        # Priority-based VIP stats (priority >= 10 = high-tier)
+        high_priority = [a for a in attendees if getattr(a, "priority", 0) >= 10]
+        mid_priority = [a for a in attendees if 1 <= getattr(a, "priority", 0) < 10]
         vip_checked = sum(
             1 for a in attendees
-            if a.role in ("vip", "speaker") and a.status == "checked_in"
+            if getattr(a, "priority", 0) >= 1 and a.status == "checked_in"
         )
 
         total_seats = len(seats)
@@ -69,7 +70,7 @@ class DashboardService:
                 round(assigned / total_seats, 3) if total_seats > 0 else 0
             ),
             "pending_approvals": len(pending),
-            "vip_count": len(vip_list),
-            "speaker_count": len(speaker_list),
+            "high_priority_count": len(high_priority),
+            "mid_priority_count": len(mid_priority),
             "vip_checked_in": vip_checked,
         }

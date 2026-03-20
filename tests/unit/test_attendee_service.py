@@ -18,7 +18,8 @@ def _fake_attendee(**overrides):
         "title": "总经理",
         "organization": "Acme",
         "department": "管理层",
-        "role": "attendee",
+        "role": "参会者",
+        "priority": 0,
         "phone": "13800000001",
         "email": "zhang@acme.com",
         "attrs": {},
@@ -58,13 +59,13 @@ class TestAttendeeServiceCreate:
         assert call_kwargs["event_id"] == eid
 
     async def test_create_with_all_fields(self, svc, repo):
-        fake = _fake_attendee(role="vip")
+        fake = _fake_attendee(role="甲方嘉宾")
         repo.create.return_value = fake
         eid = uuid.uuid4()
         result = await svc.create_attendee(
-            eid, name="李四", title="副总", role="vip", organization="Beta"
+            eid, name="李四", title="副总", role="甲方嘉宾", organization="Beta"
         )
-        assert result.role == "vip"
+        assert result.role == "甲方嘉宾"
 
     async def test_create_preserves_explicit_status(self, svc, repo):
         fake = _fake_attendee(status="confirmed")
@@ -111,19 +112,19 @@ class TestAttendeeServiceList:
     async def test_list_all(self, svc, repo):
         eid = uuid.uuid4()
         repo.get_by_event.return_value = [
-            _fake_attendee(role="attendee"),
-            _fake_attendee(role="vip"),
+            _fake_attendee(role="参会者"),
+            _fake_attendee(role="甲方嘉宾"),
         ]
         result = await svc.list_attendees_for_event(eid)
         assert len(result) == 2
 
     async def test_filter_by_role(self, svc, repo):
         repo.get_by_event.return_value = [
-            _fake_attendee(role="attendee"),
-            _fake_attendee(role="vip"),
-            _fake_attendee(role="vip"),
+            _fake_attendee(role="参会者"),
+            _fake_attendee(role="甲方嘉宾"),
+            _fake_attendee(role="甲方嘉宾"),
         ]
-        result = await svc.list_attendees_for_event(uuid.uuid4(), role="vip")
+        result = await svc.list_attendees_for_event(uuid.uuid4(), role="甲方嘉宾")
         assert len(result) == 2
 
     async def test_filter_by_status(self, svc, repo):
@@ -136,12 +137,12 @@ class TestAttendeeServiceList:
 
     async def test_filter_by_role_and_status(self, svc, repo):
         repo.get_by_event.return_value = [
-            _fake_attendee(role="vip", status="checked_in"),
-            _fake_attendee(role="vip", status="pending"),
-            _fake_attendee(role="attendee", status="checked_in"),
+            _fake_attendee(role="甲方嘉宾", status="checked_in"),
+            _fake_attendee(role="甲方嘉宾", status="pending"),
+            _fake_attendee(role="参会者", status="checked_in"),
         ]
         result = await svc.list_attendees_for_event(
-            uuid.uuid4(), role="vip", status="checked_in"
+            uuid.uuid4(), role="甲方嘉宾", status="checked_in"
         )
         assert len(result) == 1
 

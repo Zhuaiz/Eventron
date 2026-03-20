@@ -60,17 +60,27 @@ class TestAttendeeSchemas:
 
     def test_create_minimal(self):
         att = AttendeeCreate(name="张三")
-        assert att.role == "attendee"
+        assert att.role == "参会者"
+        assert att.priority == 0
         assert att.attrs == {}
 
-    def test_create_vip(self):
-        att = AttendeeCreate(name="李四", role="vip", title="CEO")
-        assert att.role == "vip"
+    def test_create_with_priority(self):
+        att = AttendeeCreate(name="李四", role="甲方嘉宾", priority=20, title="CEO")
+        assert att.role == "甲方嘉宾"
+        assert att.priority == 20
         assert att.title == "CEO"
 
-    def test_invalid_role_rejected(self):
+    def test_custom_role_accepted(self):
+        """Any free-text role label should be accepted."""
+        att = AttendeeCreate(name="王五", role="参展商")
+        assert att.role == "参展商"
+
+    def test_priority_range(self):
+        """Priority must be 0-100."""
         with pytest.raises(ValidationError):
-            AttendeeCreate(name="Bad", role="admin")
+            AttendeeCreate(name="Bad", priority=-1)
+        with pytest.raises(ValidationError):
+            AttendeeCreate(name="Bad", priority=101)
 
     def test_attrs_accepts_any_dict(self):
         att = AttendeeCreate(
@@ -86,10 +96,11 @@ class TestSeatSchemas:
     def test_create_basic(self):
         s = SeatCreate(row_num=1, col_num=3)
         assert s.seat_type == "normal"
+        assert s.zone is None
 
-    def test_create_vip(self):
-        s = SeatCreate(row_num=1, col_num=1, seat_type="vip", label="VIP-01")
-        assert s.label == "VIP-01"
+    def test_create_with_zone(self):
+        s = SeatCreate(row_num=1, col_num=1, seat_type="reserved", zone="VIP区")
+        assert s.zone == "VIP区"
 
     def test_invalid_type_rejected(self):
         with pytest.raises(ValidationError):
@@ -102,8 +113,15 @@ class TestSeatSchemas:
     def test_auto_assign_defaults(self):
         req = AutoAssignRequest()
         assert req.strategy == "random"
-        assert "vip" in req.vip_roles
 
-    def test_auto_assign_custom(self):
-        req = AutoAssignRequest(strategy="vip_first", vip_roles=["vip"])
-        assert req.strategy == "vip_first"
+    def test_auto_assign_priority(self):
+        req = AutoAssignRequest(strategy="priority_first")
+        assert req.strategy == "priority_first"
+
+    def test_auto_assign_by_zone(self):
+        req = AutoAssignRequest(strategy="by_zone")
+        assert req.strategy == "by_zone"
+
+    def test_auto_assign_invalid_strategy(self):
+        with pytest.raises(ValidationError):
+            AutoAssignRequest(strategy="magic")

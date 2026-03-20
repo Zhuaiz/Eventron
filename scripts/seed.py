@@ -77,71 +77,73 @@ EVENTS = [
 ]
 
 # ── Attendees ──────────────────────────────────────────────────
+# Priority system: 0=普通参会者, 1-9=嘉宾, 10+=贵宾/甲方
+# Role is a free-text label (e.g. "投资人", "演讲嘉宾", "工作人员")
 # Event 1: 大型发布会 — 25 人
 EVENT_1_ATTENDEES = [
-    # VIP / 投资人
-    {"name": "张明远", "title": "董事长", "organization": "华创投资", "department": "", "role": "vip", "status": "confirmed", "phone": "13800001001", "email": "zhang@huachuang.cn", "attrs": {"dietary": "无"}},
-    {"name": "李雪琴", "title": "合伙人", "organization": "红杉资本", "department": "投资部", "role": "vip", "status": "confirmed", "phone": "13800001002", "email": "lixq@sequoia.cn", "attrs": {"dietary": "素食"}},
-    {"name": "陈建国", "title": "CEO", "organization": "Eventron", "department": "管理层", "role": "vip", "status": "checked_in", "phone": "13800001003", "email": "ceo@eventron.ai", "attrs": {}},
-    {"name": "王芳", "title": "COO", "organization": "Eventron", "department": "管理层", "role": "vip", "status": "checked_in", "phone": "13800001004", "email": "coo@eventron.ai", "attrs": {}},
-    # 演讲嘉宾
-    {"name": "赵伟", "title": "CTO", "organization": "Eventron", "department": "技术部", "role": "speaker", "status": "confirmed", "phone": "13800001005", "email": "cto@eventron.ai", "attrs": {"talk_title": "AI 驱动的智能排座引擎"}},
-    {"name": "孙丽", "title": "产品 VP", "organization": "Eventron", "department": "产品部", "role": "speaker", "status": "confirmed", "phone": "13800001006", "email": "sunli@eventron.ai", "attrs": {"talk_title": "从需求到体验：Eventron 产品之路"}},
-    {"name": "刘洋", "title": "AI 首席科学家", "organization": "清华大学", "department": "计算机系", "role": "speaker", "status": "confirmed", "phone": "13800001007", "email": "liuyang@tsinghua.edu.cn", "attrs": {"talk_title": "大模型在企业服务中的落地"}},
-    # 媒体
-    {"name": "周海燕", "title": "资深记者", "organization": "36氪", "department": "企业服务组", "role": "attendee", "status": "confirmed", "phone": "13800001008", "email": "zhouhy@36kr.com", "attrs": {"media_type": "科技媒体"}},
-    {"name": "吴斌", "title": "编辑", "organization": "虎嗅", "department": "深度报道", "role": "attendee", "status": "confirmed", "phone": "13800001009", "email": "wubin@huxiu.com", "attrs": {"media_type": "科技媒体"}},
-    {"name": "郑琳", "title": "记者", "organization": "第一财经", "department": "科技版", "role": "attendee", "status": "pending", "phone": "13800001010", "email": "zhenglin@yicai.com", "attrs": {"media_type": "财经媒体"}},
-    # 合作伙伴
-    {"name": "钱进", "title": "BD 总监", "organization": "腾讯云", "department": "生态合作部", "role": "vip", "status": "pending", "phone": "13800001011", "email": "qianjin@tencent.com", "attrs": {}},
-    {"name": "杨光", "title": "产品经理", "organization": "企业微信", "department": "开放平台", "role": "attendee", "status": "pending", "phone": "13800001012", "email": "yangguang@wecom.work", "attrs": {}},
-    {"name": "徐磊", "title": "技术总监", "organization": "飞书", "department": "ISV 生态", "role": "attendee", "status": "confirmed", "phone": "13800001013", "email": "xulei@feishu.cn", "attrs": {}},
-    {"name": "朱峰", "title": "高级架构师", "organization": "阿里云", "department": "智能办公", "role": "attendee", "status": "confirmed", "phone": "13800001014", "email": "zhufeng@alibaba.com", "attrs": {}},
-    # 内部团队
-    {"name": "何晓东", "title": "前端负责人", "organization": "Eventron", "department": "技术部", "role": "staff", "status": "checked_in", "phone": "13800001015", "email": "hexd@eventron.ai", "attrs": {}},
-    {"name": "谢雨桐", "title": "后端工程师", "organization": "Eventron", "department": "技术部", "role": "staff", "status": "checked_in", "phone": "13800001016", "email": "xieyt@eventron.ai", "attrs": {}},
-    {"name": "马丽丽", "title": "UI 设计师", "organization": "Eventron", "department": "设计部", "role": "staff", "status": "confirmed", "phone": "13800001017", "email": "mall@eventron.ai", "attrs": {}},
-    {"name": "宋文博", "title": "市场经理", "organization": "Eventron", "department": "市场部", "role": "staff", "status": "confirmed", "phone": "13800001018", "email": "songwb@eventron.ai", "attrs": {}},
-    {"name": "唐颖", "title": "行政主管", "organization": "Eventron", "department": "行政部", "role": "organizer", "status": "checked_in", "phone": "13800001019", "email": "tangy@eventron.ai", "attrs": {}},
-    # 客户代表
-    {"name": "韩冰", "title": "会务总监", "organization": "万达集团", "department": "行政中心", "role": "attendee", "status": "confirmed", "phone": "13800001020", "email": "hanbing@wanda.cn", "attrs": {}},
-    {"name": "冯超", "title": "IT 经理", "organization": "美团", "department": "企业服务", "role": "attendee", "status": "confirmed", "phone": "13800001021", "email": "fengchao@meituan.com", "attrs": {}},
-    {"name": "曹雪", "title": "运营负责人", "organization": "得到 App", "department": "活动运营", "role": "attendee", "status": "pending", "phone": "13800001022", "email": "caoxue@dedao.cn", "attrs": {}},
-    {"name": "彭波", "title": "合伙人", "organization": "经纬创投", "department": "", "role": "vip", "status": "confirmed", "phone": "13800001023", "email": "pengbo@matrixpartners.cn", "attrs": {}},
-    {"name": "蒋一帆", "title": "投资经理", "organization": "IDG 资本", "department": "TMT 组", "role": "attendee", "status": "confirmed", "phone": "13800001024", "email": "jiangyf@idg.com", "attrs": {}},
-    {"name": "沈思", "title": "策划总监", "organization": "奥美", "department": "活动策划", "role": "attendee", "status": "cancelled", "phone": "13800001025", "email": "shensi@ogilvy.com", "attrs": {}},
+    # 投资人 (贵宾, priority 20)
+    {"name": "张明远", "title": "董事长", "organization": "华创投资", "department": "", "role": "投资人", "priority": 20, "status": "confirmed", "phone": "13800001001", "email": "zhang@huachuang.cn", "attrs": {"dietary": "无"}},
+    {"name": "李雪琴", "title": "合伙人", "organization": "红杉资本", "department": "投资部", "role": "投资人", "priority": 20, "status": "confirmed", "phone": "13800001002", "email": "lixq@sequoia.cn", "attrs": {"dietary": "素食"}},
+    {"name": "陈建国", "title": "CEO", "organization": "Eventron", "department": "管理层", "role": "甲方嘉宾", "priority": 15, "status": "checked_in", "phone": "13800001003", "email": "ceo@eventron.ai", "attrs": {}},
+    {"name": "王芳", "title": "COO", "organization": "Eventron", "department": "管理层", "role": "甲方嘉宾", "priority": 15, "status": "checked_in", "phone": "13800001004", "email": "coo@eventron.ai", "attrs": {}},
+    # 演讲嘉宾 (priority 10)
+    {"name": "赵伟", "title": "CTO", "organization": "Eventron", "department": "技术部", "role": "演讲嘉宾", "priority": 10, "status": "confirmed", "phone": "13800001005", "email": "cto@eventron.ai", "attrs": {"talk_title": "AI 驱动的智能排座引擎"}},
+    {"name": "孙丽", "title": "产品 VP", "organization": "Eventron", "department": "产品部", "role": "演讲嘉宾", "priority": 10, "status": "confirmed", "phone": "13800001006", "email": "sunli@eventron.ai", "attrs": {"talk_title": "从需求到体验：Eventron 产品之路"}},
+    {"name": "刘洋", "title": "AI 首席科学家", "organization": "清华大学", "department": "计算机系", "role": "演讲嘉宾", "priority": 10, "status": "confirmed", "phone": "13800001007", "email": "liuyang@tsinghua.edu.cn", "attrs": {"talk_title": "大模型在企业服务中的落地"}},
+    # 媒体 (priority 3)
+    {"name": "周海燕", "title": "资深记者", "organization": "36氪", "department": "企业服务组", "role": "媒体", "priority": 3, "status": "confirmed", "phone": "13800001008", "email": "zhouhy@36kr.com", "attrs": {"media_type": "科技媒体"}},
+    {"name": "吴斌", "title": "编辑", "organization": "虎嗅", "department": "深度报道", "role": "媒体", "priority": 3, "status": "confirmed", "phone": "13800001009", "email": "wubin@huxiu.com", "attrs": {"media_type": "科技媒体"}},
+    {"name": "郑琳", "title": "记者", "organization": "第一财经", "department": "科技版", "role": "媒体", "priority": 3, "status": "pending", "phone": "13800001010", "email": "zhenglin@yicai.com", "attrs": {"media_type": "财经媒体"}},
+    # 合作伙伴 (priority 5-10)
+    {"name": "钱进", "title": "BD 总监", "organization": "腾讯云", "department": "生态合作部", "role": "合作伙伴", "priority": 10, "status": "pending", "phone": "13800001011", "email": "qianjin@tencent.com", "attrs": {}},
+    {"name": "杨光", "title": "产品经理", "organization": "企业微信", "department": "开放平台", "role": "合作伙伴", "priority": 5, "status": "pending", "phone": "13800001012", "email": "yangguang@wecom.work", "attrs": {}},
+    {"name": "徐磊", "title": "技术总监", "organization": "飞书", "department": "ISV 生态", "role": "合作伙伴", "priority": 5, "status": "confirmed", "phone": "13800001013", "email": "xulei@feishu.cn", "attrs": {}},
+    {"name": "朱峰", "title": "高级架构师", "organization": "阿里云", "department": "智能办公", "role": "合作伙伴", "priority": 5, "status": "confirmed", "phone": "13800001014", "email": "zhufeng@alibaba.com", "attrs": {}},
+    # 内部团队 (工作人员, priority 1)
+    {"name": "何晓东", "title": "前端负责人", "organization": "Eventron", "department": "技术部", "role": "工作人员", "priority": 1, "status": "checked_in", "phone": "13800001015", "email": "hexd@eventron.ai", "attrs": {}},
+    {"name": "谢雨桐", "title": "后端工程师", "organization": "Eventron", "department": "技术部", "role": "工作人员", "priority": 1, "status": "checked_in", "phone": "13800001016", "email": "xieyt@eventron.ai", "attrs": {}},
+    {"name": "马丽丽", "title": "UI 设计师", "organization": "Eventron", "department": "设计部", "role": "工作人员", "priority": 1, "status": "confirmed", "phone": "13800001017", "email": "mall@eventron.ai", "attrs": {}},
+    {"name": "宋文博", "title": "市场经理", "organization": "Eventron", "department": "市场部", "role": "工作人员", "priority": 1, "status": "confirmed", "phone": "13800001018", "email": "songwb@eventron.ai", "attrs": {}},
+    {"name": "唐颖", "title": "行政主管", "organization": "Eventron", "department": "行政部", "role": "组织方", "priority": 5, "status": "checked_in", "phone": "13800001019", "email": "tangy@eventron.ai", "attrs": {}},
+    # 客户代表 (priority 0)
+    {"name": "韩冰", "title": "会务总监", "organization": "万达集团", "department": "行政中心", "role": "参会者", "priority": 0, "status": "confirmed", "phone": "13800001020", "email": "hanbing@wanda.cn", "attrs": {}},
+    {"name": "冯超", "title": "IT 经理", "organization": "美团", "department": "企业服务", "role": "参会者", "priority": 0, "status": "confirmed", "phone": "13800001021", "email": "fengchao@meituan.com", "attrs": {}},
+    {"name": "曹雪", "title": "运营负责人", "organization": "得到 App", "department": "活动运营", "role": "参会者", "priority": 0, "status": "pending", "phone": "13800001022", "email": "caoxue@dedao.cn", "attrs": {}},
+    {"name": "彭波", "title": "合伙人", "organization": "经纬创投", "department": "", "role": "投资人", "priority": 20, "status": "confirmed", "phone": "13800001023", "email": "pengbo@matrixpartners.cn", "attrs": {}},
+    {"name": "蒋一帆", "title": "投资经理", "organization": "IDG 资本", "department": "TMT 组", "role": "参会者", "priority": 0, "status": "confirmed", "phone": "13800001024", "email": "jiangyf@idg.com", "attrs": {}},
+    {"name": "沈思", "title": "策划总监", "organization": "奥美", "department": "活动策划", "role": "参会者", "priority": 0, "status": "cancelled", "phone": "13800001025", "email": "shensi@ogilvy.com", "attrs": {}},
 ]
 
 # Event 2: 内部评审会 — 12 人
 EVENT_2_ATTENDEES = [
-    {"name": "陈建国", "title": "CEO", "organization": "Eventron", "department": "管理层", "role": "vip", "status": "confirmed", "phone": "13800001003", "email": "ceo@eventron.ai", "attrs": {}},
-    {"name": "赵伟", "title": "CTO", "organization": "Eventron", "department": "技术部", "role": "vip", "status": "confirmed", "phone": "13800001005", "email": "cto@eventron.ai", "attrs": {}},
-    {"name": "孙丽", "title": "产品 VP", "organization": "Eventron", "department": "产品部", "role": "speaker", "status": "confirmed", "phone": "13800001006", "email": "sunli@eventron.ai", "attrs": {}},
-    {"name": "何晓东", "title": "前端负责人", "organization": "Eventron", "department": "技术部", "role": "speaker", "status": "confirmed", "phone": "13800001015", "email": "hexd@eventron.ai", "attrs": {}},
-    {"name": "谢雨桐", "title": "后端工程师", "organization": "Eventron", "department": "技术部", "role": "attendee", "status": "confirmed", "phone": "13800001016", "email": "xieyt@eventron.ai", "attrs": {}},
-    {"name": "马丽丽", "title": "UI 设计师", "organization": "Eventron", "department": "设计部", "role": "attendee", "status": "confirmed", "phone": "13800001017", "email": "mall@eventron.ai", "attrs": {}},
-    {"name": "宋文博", "title": "市场经理", "organization": "Eventron", "department": "市场部", "role": "attendee", "status": "pending", "phone": "13800001018", "email": "songwb@eventron.ai", "attrs": {}},
-    {"name": "王芳", "title": "COO", "organization": "Eventron", "department": "管理层", "role": "vip", "status": "confirmed", "phone": "13800001004", "email": "coo@eventron.ai", "attrs": {}},
-    {"name": "林志远", "title": "数据工程师", "organization": "Eventron", "department": "技术部", "role": "attendee", "status": "confirmed", "phone": "13800001030", "email": "linzy@eventron.ai", "attrs": {}},
-    {"name": "黄嘉琪", "title": "测试工程师", "organization": "Eventron", "department": "技术部", "role": "attendee", "status": "confirmed", "phone": "13800001031", "email": "huangjq@eventron.ai", "attrs": {}},
-    {"name": "罗鑫", "title": "DevOps", "organization": "Eventron", "department": "技术部", "role": "attendee", "status": "absent", "phone": "13800001032", "email": "luoxin@eventron.ai", "attrs": {}},
-    {"name": "邓紫琪", "title": "产品经理", "organization": "Eventron", "department": "产品部", "role": "attendee", "status": "confirmed", "phone": "13800001033", "email": "dengzq@eventron.ai", "attrs": {}},
+    {"name": "陈建国", "title": "CEO", "organization": "Eventron", "department": "管理层", "role": "管理层", "priority": 15, "status": "confirmed", "phone": "13800001003", "email": "ceo@eventron.ai", "attrs": {}},
+    {"name": "赵伟", "title": "CTO", "organization": "Eventron", "department": "技术部", "role": "管理层", "priority": 15, "status": "confirmed", "phone": "13800001005", "email": "cto@eventron.ai", "attrs": {}},
+    {"name": "孙丽", "title": "产品 VP", "organization": "Eventron", "department": "产品部", "role": "汇报人", "priority": 10, "status": "confirmed", "phone": "13800001006", "email": "sunli@eventron.ai", "attrs": {}},
+    {"name": "何晓东", "title": "前端负责人", "organization": "Eventron", "department": "技术部", "role": "汇报人", "priority": 10, "status": "confirmed", "phone": "13800001015", "email": "hexd@eventron.ai", "attrs": {}},
+    {"name": "谢雨桐", "title": "后端工程师", "organization": "Eventron", "department": "技术部", "role": "参会者", "priority": 0, "status": "confirmed", "phone": "13800001016", "email": "xieyt@eventron.ai", "attrs": {}},
+    {"name": "马丽丽", "title": "UI 设计师", "organization": "Eventron", "department": "设计部", "role": "参会者", "priority": 0, "status": "confirmed", "phone": "13800001017", "email": "mall@eventron.ai", "attrs": {}},
+    {"name": "宋文博", "title": "市场经理", "organization": "Eventron", "department": "市场部", "role": "参会者", "priority": 0, "status": "pending", "phone": "13800001018", "email": "songwb@eventron.ai", "attrs": {}},
+    {"name": "王芳", "title": "COO", "organization": "Eventron", "department": "管理层", "role": "管理层", "priority": 15, "status": "confirmed", "phone": "13800001004", "email": "coo@eventron.ai", "attrs": {}},
+    {"name": "林志远", "title": "数据工程师", "organization": "Eventron", "department": "技术部", "role": "参会者", "priority": 0, "status": "confirmed", "phone": "13800001030", "email": "linzy@eventron.ai", "attrs": {}},
+    {"name": "黄嘉琪", "title": "测试工程师", "organization": "Eventron", "department": "技术部", "role": "参会者", "priority": 0, "status": "confirmed", "phone": "13800001031", "email": "huangjq@eventron.ai", "attrs": {}},
+    {"name": "罗鑫", "title": "DevOps", "organization": "Eventron", "department": "技术部", "role": "参会者", "priority": 0, "status": "absent", "phone": "13800001032", "email": "luoxin@eventron.ai", "attrs": {}},
+    {"name": "邓紫琪", "title": "产品经理", "organization": "Eventron", "department": "产品部", "role": "参会者", "priority": 0, "status": "confirmed", "phone": "13800001033", "email": "dengzq@eventron.ai", "attrs": {}},
 ]
 
 # Event 3: 客户晚宴 — 12 人
 EVENT_3_ATTENDEES = [
-    {"name": "陈建国", "title": "CEO", "organization": "Eventron", "department": "管理层", "role": "vip", "status": "pending", "phone": "13800001003", "email": "ceo@eventron.ai", "attrs": {"dietary": "无"}},
-    {"name": "王芳", "title": "COO", "organization": "Eventron", "department": "管理层", "role": "vip", "status": "pending", "phone": "13800001004", "email": "coo@eventron.ai", "attrs": {"dietary": "无"}},
-    {"name": "韩冰", "title": "会务总监", "organization": "万达集团", "department": "行政中心", "role": "vip", "status": "pending", "phone": "13800001020", "email": "hanbing@wanda.cn", "attrs": {"dietary": "无"}},
-    {"name": "冯超", "title": "IT 经理", "organization": "美团", "department": "企业服务", "role": "attendee", "status": "pending", "phone": "13800001021", "email": "fengchao@meituan.com", "attrs": {}},
-    {"name": "曹雪", "title": "运营负责人", "organization": "得到 App", "department": "活动运营", "role": "attendee", "status": "pending", "phone": "13800001022", "email": "caoxue@dedao.cn", "attrs": {}},
-    {"name": "钱进", "title": "BD 总监", "organization": "腾讯云", "department": "生态合作部", "role": "vip", "status": "pending", "phone": "13800001011", "email": "qianjin@tencent.com", "attrs": {}},
-    {"name": "杨光", "title": "产品经理", "organization": "企业微信", "department": "开放平台", "role": "attendee", "status": "pending", "phone": "13800001012", "email": "yangguang@wecom.work", "attrs": {}},
-    {"name": "高明", "title": "CIO", "organization": "碧桂园", "department": "信息中心", "role": "vip", "status": "pending", "phone": "13800001040", "email": "gaoming@bgy.cn", "attrs": {"dietary": "清真"}},
-    {"name": "龙飞", "title": "副总裁", "organization": "字节跳动", "department": "企业服务", "role": "vip", "status": "pending", "phone": "13800001041", "email": "longfei@bytedance.com", "attrs": {}},
-    {"name": "范晓萱", "title": "大客户经理", "organization": "Eventron", "department": "销售部", "role": "organizer", "status": "pending", "phone": "13800001042", "email": "fanxx@eventron.ai", "attrs": {}},
-    {"name": "程浩", "title": "解决方案架构师", "organization": "华为云", "department": "企业智能", "role": "attendee", "status": "pending", "phone": "13800001043", "email": "chenghao@huawei.com", "attrs": {}},
-    {"name": "苏锐", "title": "商务总监", "organization": "京东", "department": "企业采购", "role": "attendee", "status": "pending", "phone": "13800001044", "email": "surui@jd.com", "attrs": {}},
+    {"name": "陈建国", "title": "CEO", "organization": "Eventron", "department": "管理层", "role": "甲方嘉宾", "priority": 15, "status": "pending", "phone": "13800001003", "email": "ceo@eventron.ai", "attrs": {"dietary": "无"}},
+    {"name": "王芳", "title": "COO", "organization": "Eventron", "department": "管理层", "role": "甲方嘉宾", "priority": 15, "status": "pending", "phone": "13800001004", "email": "coo@eventron.ai", "attrs": {"dietary": "无"}},
+    {"name": "韩冰", "title": "会务总监", "organization": "万达集团", "department": "行政中心", "role": "客户代表", "priority": 10, "status": "pending", "phone": "13800001020", "email": "hanbing@wanda.cn", "attrs": {"dietary": "无"}},
+    {"name": "冯超", "title": "IT 经理", "organization": "美团", "department": "企业服务", "role": "客户代表", "priority": 5, "status": "pending", "phone": "13800001021", "email": "fengchao@meituan.com", "attrs": {}},
+    {"name": "曹雪", "title": "运营负责人", "organization": "得到 App", "department": "活动运营", "role": "参会者", "priority": 0, "status": "pending", "phone": "13800001022", "email": "caoxue@dedao.cn", "attrs": {}},
+    {"name": "钱进", "title": "BD 总监", "organization": "腾讯云", "department": "生态合作部", "role": "客户代表", "priority": 10, "status": "pending", "phone": "13800001011", "email": "qianjin@tencent.com", "attrs": {}},
+    {"name": "杨光", "title": "产品经理", "organization": "企业微信", "department": "开放平台", "role": "参会者", "priority": 0, "status": "pending", "phone": "13800001012", "email": "yangguang@wecom.work", "attrs": {}},
+    {"name": "高明", "title": "CIO", "organization": "碧桂园", "department": "信息中心", "role": "客户代表", "priority": 10, "status": "pending", "phone": "13800001040", "email": "gaoming@bgy.cn", "attrs": {"dietary": "清真"}},
+    {"name": "龙飞", "title": "副总裁", "organization": "字节跳动", "department": "企业服务", "role": "客户代表", "priority": 10, "status": "pending", "phone": "13800001041", "email": "longfei@bytedance.com", "attrs": {}},
+    {"name": "范晓萱", "title": "大客户经理", "organization": "Eventron", "department": "销售部", "role": "组织方", "priority": 5, "status": "pending", "phone": "13800001042", "email": "fanxx@eventron.ai", "attrs": {}},
+    {"name": "程浩", "title": "解决方案架构师", "organization": "华为云", "department": "企业智能", "role": "参会者", "priority": 0, "status": "pending", "phone": "13800001043", "email": "chenghao@huawei.com", "attrs": {}},
+    {"name": "苏锐", "title": "商务总监", "organization": "京东", "department": "企业采购", "role": "参会者", "priority": 0, "status": "pending", "phone": "13800001044", "email": "surui@jd.com", "attrs": {}},
 ]
 
 
@@ -209,11 +211,20 @@ async def seed(reset: bool = False):
                 for c in range(1, cols + 1):
                     label = f"{chr(64 + r)}{c}"
 
-                    # Determine seat type
+                    # Determine seat type + zone
+                    zone = None
                     if layout in ("theater", "classroom"):
-                        stype = "vip" if r == 1 else "normal"
+                        if r == 1:
+                            stype = "reserved"
+                            zone = "贵宾区"
+                        else:
+                            stype = "normal"
                     elif layout == "banquet":
-                        stype = "vip" if r <= 2 else "normal"
+                        if r <= 2:
+                            stype = "reserved"
+                            zone = "贵宾区"
+                        else:
+                            stype = "normal"
                     else:
                         stype = "normal"
 
@@ -227,6 +238,7 @@ async def seed(reset: bool = False):
                         col_num=c,
                         label=label,
                         seat_type=stype,
+                        zone=zone,
                     )
                     session.add(seat)
                     seat_orm[(eid, r, c)] = seat
@@ -342,7 +354,7 @@ async def seed(reset: bool = False):
         print(f"  {evt_data['name']}")
         print(f"    {evt_data['location']} | {evt_data['venue_rows']}×{evt_data['venue_cols']} 座")
     print("=" * 50)
-    print("  访问管理后台: http://localhost:8000/admin")
+    print("  API 文档: http://localhost:8000/docs")
 
 
 if __name__ == "__main__":

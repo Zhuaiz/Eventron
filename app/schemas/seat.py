@@ -12,7 +12,8 @@ class SeatCreate(BaseModel):
     row_num: int = Field(..., ge=1)
     col_num: int = Field(..., ge=1)
     label: Optional[str] = Field(None, max_length=20)
-    seat_type: str = Field("normal", pattern=r"^(normal|vip|reserved|disabled|aisle)$")
+    seat_type: str = Field("normal", pattern=r"^(normal|reserved|disabled|aisle)$")
+    zone: Optional[str] = Field(None, max_length=50)
 
 
 class SeatUpdate(BaseModel):
@@ -20,8 +21,9 @@ class SeatUpdate(BaseModel):
 
     label: Optional[str] = Field(None, max_length=20)
     seat_type: Optional[str] = Field(
-        None, pattern=r"^(normal|vip|reserved|disabled|aisle)$"
+        None, pattern=r"^(normal|reserved|disabled|aisle)$"
     )
+    zone: Optional[str] = Field(None, max_length=50)
     attendee_id: Optional[uuid.UUID] = None
 
 
@@ -36,6 +38,7 @@ class SeatResponse(BaseModel):
     col_num: int
     label: Optional[str]
     seat_type: str
+    zone: Optional[str]
     attendee_id: Optional[uuid.UUID]
 
 
@@ -44,6 +47,7 @@ class AutoAssignRequest(BaseModel):
 
     strategy: str = Field(
         "random",
-        pattern=r"^(random|vip_first|by_department|constrained)$",
+        pattern=r"^(random|priority_first|by_department|by_zone)$",
     )
-    vip_roles: list[str] = Field(default_factory=lambda: ["vip", "speaker"])
+    # priority_first: high-priority attendees get front/center seats
+    # by_zone: match attendee priority to seat zones

@@ -49,10 +49,12 @@ Import rules: models→nothing | repos→models | services→repos | api→servi
 **Event:** name, event_date, location, venue_rows/cols, layout_type(theater|classroom|roundtable|banquet|u_shape), status(draft|active|completed|cancelled), config(JSONB)
 - Transitions: draft→{active,cancelled}, active→{completed,cancelled}, cancelled→{draft}, completed→{}
 
-**Attendee:** event_id(FK), name, title, organization, department, role(attendee|vip|speaker|organizer|staff), phone, email, attrs(JSONB), wecom_user_id, lark_user_id, status(pending|confirmed|checked_in|absent|cancelled)
+**Attendee:** event_id(FK), name, title, organization, department, role(free-text, e.g. "甲方嘉宾"/"演讲嘉宾"/"工作人员"/"参会者"), priority(int 0-100, higher=more important, used for seating), phone, email, attrs(JSONB), wecom_user_id, lark_user_id, status(pending|confirmed|checked_in|absent|cancelled)
+- `role` is a free-text label (no enum). Default "参会者".
+- `priority` drives seat assignment algorithms (front row, zone matching).
 - `attrs` JSONB = escape hatch. Never add columns for one-off attributes.
 
-**Seat:** event_id(FK), row_num, col_num, label, seat_type(normal|vip|reserved|disabled|aisle), attendee_id(FK). UniqueConstraint(event_id, row_num, col_num).
+**Seat:** event_id(FK), row_num, col_num, label, seat_type(normal|reserved|disabled|aisle), zone(nullable String, e.g. "贵宾区"/"嘉宾区"), attendee_id(FK). UniqueConstraint(event_id, row_num, col_num).
 
 **ApprovalRequest:** event_id, requester_id, change_type(swap|add_person|remove|reassign|bulk_change), change_detail(JSONB), status(pending|approved|rejected|expired), lg_thread_id
 
@@ -108,7 +110,7 @@ EventronError → NotFoundError(Event/Attendee/Seat/Template) | SeatNotAvailable
 
 ## Test Status
 
-176 unit tests passing. Files: test_seating_engine, test_excel_io, test_schemas, test_services, test_event_service(41), test_attendee_service(15), test_badge_template_service(13), test_auth_service(15), test_identity_service(12), test_import_service(10), test_dashboard_service(3). Skipped: test_qr_gen (missing qrcode dep in dev env).
+179 unit tests passing. Files: test_seating_engine(17), test_excel_io(10), test_schemas(19), test_services(19), test_event_service(41), test_attendee_service(15), test_badge_template_service(13), test_auth_service(15), test_identity_service(13), test_import_service(14), test_dashboard_service(3). Skipped: test_qr_gen (missing qrcode dep in dev env).
 
 ## Implementation Phases
 
@@ -132,8 +134,18 @@ EventronError → NotFoundError(Event/Attendee/Seat/Template) | SeatNotAvailable
   - BadgeTab: template gallery + PDF generate buttons
   - Badge plugin: sub-intent routing (generate/list/design)
 
+- **Phase 9** — Priority-based roles + venue zones + seat map editor:
+  - **Role refactor:** Replaced fixed role enum (vip/speaker/organizer/staff/attendee) with free-text `role` + `priority` (int 0-100). Labels customizable (甲方嘉宾, 演讲嘉宾, 工作人员, etc.).
+  - **Venue zones:** Added `seat.zone` (nullable string, e.g. "贵宾区", "嘉宾区"). Zone-aware seating algorithms.
+  - **Seating algorithms:** priority_first, by_zone, by_department (all priority-based), random, legacy vip_first (compat).
+  - **AI zone suggestion:** `suggest_zones()` pure heuristic + `GET /seats/suggest-zones` API endpoint.
+  - **Seat map editor:** Zone painting (click-to-paint seats into zones), AI auto-zone, zone legend, priority-based seat colors.
+  - **Frontend updates:** AddAttendeeModal (role presets + priority slider), AttendeesTab (priority-based badges), SeatingTab (zone painting + AI suggestions + SubAgentPanel).
+  - **Migration:** `c3a7d8e2f195` — adds attendee.priority, seat.zone, migrates old role values + vip seat_type.
+  - API: `PATCH /seats/{seat_id}` (update zone/type), `GET /seats/suggest-zones` (AI zone suggestions).
+
 ### Next 🔜
-- **Phase B (Portal)** — 座位图编辑器, 物料计算与物料管理(按活动规模自动估算+手动调整), 铭牌设计(模板管理收进badge agent+活动内BadgeTab，外层菜单降级admin-only), 签到页设计(H5+AI), 子Agent面板, 签到实时看板(WebSocket), 审批中心
+- **Phase B (Portal)** — 物料计算与物料管理(按活动规模自动估算+手动调整), 铭牌设计(模板管理收进badge agent+活动内BadgeTab，外层菜单降级admin-only), 签到页设计(H5+AI), 子Agent面板, 签到实时看板(WebSocket), 审批中心
 - **Phase C (Portal)** — 团队协作(多Organizer), 自动审批规则引擎
 
 ## Quickstart

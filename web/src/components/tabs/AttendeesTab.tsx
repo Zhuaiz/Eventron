@@ -8,13 +8,13 @@ interface AttendeesTabProps {
   eventId: string;
 }
 
-const ROLE_LABELS = {
-  attendee: { label: '参会者', color: 'bg-blue-100 text-blue-800' },
-  vip: { label: 'VIP', color: 'bg-purple-100 text-purple-800' },
-  speaker: { label: '演讲者', color: 'bg-orange-100 text-orange-800' },
-  organizer: { label: '组织者', color: 'bg-red-100 text-red-800' },
-  staff: { label: '工作人员', color: 'bg-gray-100 text-gray-800' },
-};
+// Priority-based role badge colors (role is now free-text)
+function getRoleBadgeColor(priority: number): string {
+  if (priority >= 10) return 'bg-purple-100 text-purple-800';
+  if (priority >= 5) return 'bg-orange-100 text-orange-800';
+  if (priority >= 1) return 'bg-blue-100 text-blue-800';
+  return 'bg-gray-100 text-gray-800';
+}
 
 const STATUS_LABELS = {
   pending: { label: '待确认', color: 'bg-yellow-100 text-yellow-800' },
@@ -161,12 +161,13 @@ export function AttendeesTab({ eventId }: AttendeesTabProps) {
                   <td className="px-6 py-4 text-sm">
                     <span
                       className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
-                        ROLE_LABELS[attendee.role as keyof typeof ROLE_LABELS]
-                          ?.color || 'bg-gray-100 text-gray-800'
+                        getRoleBadgeColor(attendee.priority ?? 0)
                       }`}
                     >
-                      {ROLE_LABELS[attendee.role as keyof typeof ROLE_LABELS]
-                        ?.label || attendee.role}
+                      {attendee.role || '参会者'}
+                      {(attendee.priority ?? 0) > 0 && (
+                        <span className="ml-1 opacity-60">P{attendee.priority}</span>
+                      )}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-sm">

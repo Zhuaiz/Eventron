@@ -1,18 +1,21 @@
 """Seat API routes — thin layer, delegates to SeatingService."""
 
 import uuid
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.deps import get_seating_service
-from app.schemas.seat import AutoAssignRequest, SeatResponse
+from app.deps import get_attendee_service, get_event_service, get_seating_service
+from app.schemas.seat import AutoAssignRequest, SeatResponse, SeatUpdate
+from app.services.attendee_service import AttendeeService
+from app.services.event_service import EventService
 from app.services.exceptions import (
     DuplicateAssignmentError,
+    EventNotFoundError,
     SeatNotAvailableError,
     SeatNotFoundError,
 )
 from app.services.seating_service import SeatingService
+from tools.seating_engine import suggest_zones
 
 router = APIRouter()
 
@@ -45,10 +48,13 @@ async def auto_assign(
     body: AutoAssignRequest,
     svc: SeatingService = Depends(get_seating_service),
 ):
-    """Run auto-assignment algorithm."""
+    """Run auto-assignment algorithm.
+
+    Strategies: random, priority_first, by_department, by_zone.
+    """
     try:
         assignments = await svc.auto_assign(
-            event_id, strategy=body.strategy, vip_roles=tuple(body.vip_roles)
+            event_id, strategy=body.strategy,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -72,6 +78,25 @@ async def assign_seat(
     return SeatResponse.model_validate(seat)
 
 
+@router.patch("/{event_id}/seats/{seat_id}", response_model=SeatResponse)
+async def update_seat(
+    event_id: uuid.UUID,
+    seat_id: uuid.UUID,
+    body: SeatUpdate,
+    svc: SeatingService = Depends(get_seating_service),
+):
+    """Update seat properties (zone, type, label)."""
+    seat = await svc._seat_repo.get_by_id(seat_id)
+    if seat is None:
+        raise HTTPException(status_code=404, detail="Seat not found")
+
+    data = body.model_dump(exclude_unset=True)
+    for key, val in data.items():
+        setattr(seat, key, val)
+    await svc._seat_repo._session.flush()
+    return SeatResponse.model_validate(seat)
+
+
 @router.post("/{event_id}/seats/swap")
 async def swap_seats(
     event_id: uuid.UUID,
@@ -88,3 +113,28 @@ async def swap_seats(
         "seat_a": SeatResponse.model_validate(a),
         "seat_b": SeatResponse.model_validate(b),
     }
+
+
+@router.get("/{event_id}/seats/suggest-zones")
+async def suggest_venue_zones(
+    event_id: uuid.UUID,
+    event_svc: EventService = Depends(get_event_service),
+    att_svc: AttendeeService = Depends(get_attendee_service),
+):
+    """AI-suggested zone layout based on attendee composition.
+
+    Returns zone suggestions with row ranges, colors, and descriptions.
+    """
+    try:
+        event = await event_svc.get_event(event_id)
+    except EventNotFoundError:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    attendees = await att_svc.list_attendees_for_event(event_id)
+    att_dicts = [
+        {"priority": getattr(a, "priority", 0)}
+        for a in attendees
+    ]
+
+    zones = suggest_zones(event.venue_rows, event.venue_cols, att_dicts)
+    return {"zones": zones, "total_rows": event.venue_rows}

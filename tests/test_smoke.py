@@ -37,9 +37,9 @@ class TestProjectSkeleton:
         """Test data factories return expected structures."""
         from tests.factories import make_attendee, make_event, make_seat_grid
 
-        att = make_attendee(name="李四", role="vip")
+        att = make_attendee(name="李四", role="甲方嘉宾")
         assert att["name"] == "李四"
-        assert att["role"] == "vip"
+        assert att["role"] == "甲方嘉宾"
 
         ev = make_event(venue_rows=5, venue_cols=3)
         assert ev["venue_rows"] == 5

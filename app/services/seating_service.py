@@ -13,6 +13,8 @@ from app.services.exceptions import (
 )
 from tools.seating_engine import (
     assign_seats_by_department,
+    assign_seats_by_zone,
+    assign_seats_priority_first,
     assign_seats_random,
     assign_seats_vip_first,
 )
@@ -47,14 +49,16 @@ class SeatingService:
         self,
         event_id: uuid.UUID,
         strategy: str = "random",
-        vip_roles: tuple[str, ...] = ("vip", "speaker"),
+        zone_rules: list[dict] | None = None,
     ) -> list[dict[str, str]]:
         """Run auto-assignment algorithm and persist results.
 
         Args:
             event_id: Target event.
-            strategy: 'random', 'vip_first', or 'by_department'.
-            vip_roles: Roles treated as VIP (for vip_first strategy).
+            strategy: 'random', 'priority_first', 'by_department',
+                      'by_zone', or legacy 'vip_first'.
+            zone_rules: For by_zone strategy, list of
+                {zone: str, min_priority: int}.
 
         Returns:
             List of {attendee_id, seat_id} assignments made.
@@ -63,40 +67,46 @@ class SeatingService:
         all_seats = await self._seat_repo.get_by_event(event_id)
         seats = await self._seat_repo.get_available_seats(event_id)
 
-        # Find attendees who already have seats assigned
         seated_ids = {
             str(s.attendee_id) for s in all_seats if s.attendee_id is not None
         }
 
-        # Convert ORM objects to plain dicts, excluding already-seated
         att_dicts = [
             {
                 "id": str(a.id),
                 "name": a.name,
                 "role": a.role,
+                "priority": getattr(a, "priority", 0),
                 "department": a.department,
             }
             for a in attendees
-            if a.status in ("confirmed", "pending") and str(a.id) not in seated_ids
+            if a.status in ("confirmed", "pending")
+            and str(a.id) not in seated_ids
         ]
         seat_dicts = [
             {
                 "id": str(s.id),
                 "row_num": s.row_num,
                 "col_num": s.col_num,
+                "zone": getattr(s, "zone", None),
             }
             for s in seats
         ]
 
-        # Pick algorithm
-        if strategy == "vip_first":
-            assignments = assign_seats_vip_first(att_dicts, seat_dicts, vip_roles)
+        if strategy == "priority_first":
+            assignments = assign_seats_priority_first(att_dicts, seat_dicts)
         elif strategy == "by_department":
             assignments = assign_seats_by_department(att_dicts, seat_dicts)
+        elif strategy == "by_zone":
+            assignments = assign_seats_by_zone(
+                att_dicts, seat_dicts, zone_rules
+            )
+        elif strategy == "vip_first":
+            # Legacy compat
+            assignments = assign_seats_vip_first(att_dicts, seat_dicts)
         else:
             assignments = assign_seats_random(att_dicts, seat_dicts)
 
-        # Persist assignments
         for a in assignments:
             await self._seat_repo.assign_attendee(
                 uuid.UUID(a["seat_id"]),

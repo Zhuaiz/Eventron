@@ -191,9 +191,17 @@ export class ApiClient {
   }
 
   async autoAssignSeats(eventId: string, strategy: string = 'random') {
-    return this.request('POST', `/events/${eventId}/seats/auto-assign`, {
-      strategy, vip_roles: ['vip', 'speaker'],
-    });
+    return this.request('POST', `/events/${eventId}/seats/auto-assign`, { strategy });
+  }
+
+  async updateSeat(eventId: string, seatId: string, data: Record<string, unknown>) {
+    return this.request('PATCH', `/events/${eventId}/seats/${seatId}`, data);
+  }
+
+  async suggestZones(eventId: string) {
+    return this.request<{ zones: any[]; total_rows: number }>(
+      'GET', `/events/${eventId}/seats/suggest-zones`
+    );
   }
 
   async assignSeat(eventId: string, seatId: string, attendeeId: string) {

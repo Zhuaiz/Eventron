@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,8 +26,10 @@ class Attendee(Base, UUIDMixin, TimestampMixin):
     title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     organization: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     department: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    role: Mapped[str] = mapped_column(String(50), default="attendee")
-    # attendee | vip | speaker | organizer | staff
+    role: Mapped[str] = mapped_column(String(50), default="参会者")
+    # Free-text label (e.g. "甲方嘉宾", "参展商", "工作人员")
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    # Higher = more important. Used for seating (front-row, VIP zones).
     phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 

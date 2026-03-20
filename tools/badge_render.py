@@ -13,13 +13,13 @@ from jinja2 import Environment, FileSystemLoader
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates" / "badges"
 
-# Role display labels (Chinese)
-ROLE_LABELS: dict[str, str] = {
-    "vip": "贵宾",
-    "speaker": "演讲者",
-    "organizer": "组织者",
-    "staff": "工作人员",
-    "attendee": "参会者",
+# Priority tier display labels (Chinese)
+# Higher priority = more important.  Role labels are now free-text,
+# so we fall back to the attendee's own role string.
+PRIORITY_TIER_LABELS: dict[str, str] = {
+    "high": "贵宾",   # priority >= 10
+    "mid": "嘉宾",    # 1 <= priority < 10
+    "normal": "参会者",  # priority == 0
 }
 
 # Built-in template name → (html file, css file)
@@ -44,9 +44,18 @@ def _prepare_attendees(
     result = []
     for att in attendees:
         enriched = dict(att)
-        enriched["role_label"] = ROLE_LABELS.get(
-            att.get("role", "attendee"), "参会者"
-        )
+        # Use the attendee's free-text role directly as the badge label.
+        # Fall back to a priority-tier label if role is generic.
+        role = att.get("role", "参会者")
+        pri = att.get("priority", 0)
+        if role in ("参会者", "") or not role:
+            if pri >= 10:
+                role = PRIORITY_TIER_LABELS["high"]
+            elif pri >= 1:
+                role = PRIORITY_TIER_LABELS["mid"]
+            else:
+                role = PRIORITY_TIER_LABELS["normal"]
+        enriched["role_label"] = role
         # qr_data can be a base64 data-uri set by the caller
         if "qr_data" not in enriched:
             enriched["qr_data"] = ""
