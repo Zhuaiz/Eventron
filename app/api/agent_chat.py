@@ -130,6 +130,7 @@ async def agent_chat(
     message: str = Form(...),
     event_id: str | None = Form(None),
     session_id: str | None = Form(None),
+    scope: str | None = Form(None),
     files: list[UploadFile] = File(default=[]),
     organizer=Depends(get_current_organizer),
     event_svc: EventService = Depends(get_event_service),
@@ -142,6 +143,7 @@ async def agent_chat(
     - message: User message text
     - event_id: Optional event context
     - session_id: Optional session continuity
+    - scope: Optional plugin scope (badge/checkin/seating/organizer)
     - files: Optional file attachments (images, Excel, PDF)
     """
     sid, session = _get_session(session_id)
@@ -195,6 +197,7 @@ async def agent_chat(
         "turn_output": None,
         "attachments": session.get("attachments", []),
         "task_plan": session.get("task_plan", []),
+        "scope": scope,
     }
 
     # Run the graph

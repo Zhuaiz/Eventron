@@ -125,9 +125,15 @@ EventronError → NotFoundError(Event/Attendee/Seat/Template) | SeatNotAvailable
   - Services: auth(JWT/PBKDF2), identity, session(Redis), dashboard, import(Excel), attendee, badge_template
   - API v1: auth, dashboard, import, badge-templates, events CRUD+duplicate, attendees full CRUD+checkin
 
+- **Phase 8** — H5 pages + badges:
+  - tools: badge_render(Jinja2+WeasyPrint, business/tent_card templates), page_render(H5 checkin page)
+  - API: /export/badges PDF endpoint, scope-routed agent chat
+  - AgentState.scope for forced plugin routing from SubAgentPanel
+  - BadgeTab: template gallery + PDF generate buttons
+  - Badge plugin: sub-intent routing (generate/list/design)
+
 ### Next 🔜
-- **Phase 8** — H5 pages + badges (Jinja2 templates, badge_render, page_render, pages/router)
-- **Phase B (Portal)** — 座位图编辑器, 物料生成(胸牌/桌签PDF), 物料计算与物料管理(按活动规模自动估算+手动调整), 铭牌设计(模板管理收进badge agent+活动内BadgeTab，外层菜单降级admin-only), 签到页设计(H5+AI), 签到实时看板(WebSocket), 审批中心
+- **Phase B (Portal)** — 座位图编辑器, 物料计算与物料管理(按活动规模自动估算+手动调整), 铭牌设计(模板管理收进badge agent+活动内BadgeTab，外层菜单降级admin-only), 签到页设计(H5+AI), 子Agent面板, 签到实时看板(WebSocket), 审批中心
 - **Phase C (Portal)** — 团队协作(多Organizer), 自动审批规则引擎
 
 ## Quickstart
@@ -139,6 +145,12 @@ make up               # docker compose postgres + redis
 alembic upgrade head && python scripts/seed.py
 make all              # docker compose up --build
 ```
+
+## Git
+
+Repo: https://github.com/Zhuaiz/Eventron (Apache 2.0)
+Push: `git remote set-url origin https://Zhuaiz:<PAT>@github.com/Zhuaiz/Eventron.git && git push`
+PAT 存本地，不入库。推完后 `git remote set-url origin https://github.com/Zhuaiz/Eventron.git` 清掉 token。
 
 ## Don'ts
 

@@ -1,0 +1,144 @@
+"""Badge / tent-card PDF rendering — pure tool, no DB or HTTP.
+
+Uses Jinja2 for HTML templating and WeasyPrint for PDF generation.
+All data is passed in as plain dicts by the calling agent/service.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from jinja2 import Environment, FileSystemLoader
+
+TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates" / "badges"
+
+# Role display labels (Chinese)
+ROLE_LABELS: dict[str, str] = {
+    "vip": "贵宾",
+    "speaker": "演讲者",
+    "organizer": "组织者",
+    "staff": "工作人员",
+    "attendee": "参会者",
+}
+
+# Built-in template name → (html file, css file)
+BUILTIN_TEMPLATES: dict[str, tuple[str, str]] = {
+    "business": ("business.html", "business.css"),
+    "tent_card": ("tent_card.html", "tent_card.css"),
+}
+
+
+def _load_builtin_css(css_filename: str) -> str:
+    """Load CSS from the templates/badges/ directory."""
+    css_path = TEMPLATE_DIR / css_filename
+    if css_path.exists():
+        return css_path.read_text(encoding="utf-8")
+    return ""
+
+
+def _prepare_attendees(
+    attendees: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Enrich attendee dicts with role_label and qr_data placeholder."""
+    result = []
+    for att in attendees:
+        enriched = dict(att)
+        enriched["role_label"] = ROLE_LABELS.get(
+            att.get("role", "attendee"), "参会者"
+        )
+        # qr_data can be a base64 data-uri set by the caller
+        if "qr_data" not in enriched:
+            enriched["qr_data"] = ""
+        result.append(enriched)
+    return result
+
+
+def render_badges_html(
+    attendees: list[dict[str, Any]],
+    event_name: str,
+    event_date: str = "",
+    template_name: str = "business",
+    custom_html: str | None = None,
+    custom_css: str | None = None,
+) -> str:
+    """Render badge HTML from a built-in or custom template.
+
+    Args:
+        attendees: List of attendee dicts (name, title, organization, role).
+        event_name: Display name of the event.
+        event_date: Optional formatted date string.
+        template_name: Built-in template key ("business" or "tent_card").
+        custom_html: If provided, use this Jinja2 HTML instead of built-in.
+        custom_css: If provided, use this CSS instead of built-in.
+
+    Returns:
+        Rendered HTML string ready for WeasyPrint.
+    """
+    enriched = _prepare_attendees(attendees)
+
+    if custom_html:
+        # Use custom template from BadgeTemplate.html_template
+        env = Environment(autoescape=False)
+        tpl = env.from_string(custom_html)
+        css = custom_css or ""
+    else:
+        # Use built-in file template
+        if template_name not in BUILTIN_TEMPLATES:
+            template_name = "business"
+        html_file, css_file = BUILTIN_TEMPLATES[template_name]
+        env = Environment(
+            loader=FileSystemLoader(str(TEMPLATE_DIR)),
+            autoescape=False,
+        )
+        tpl = env.get_template(html_file)
+        css = _load_builtin_css(css_file)
+
+    return tpl.render(
+        attendees=enriched,
+        event_name=event_name,
+        event_date=event_date,
+        css=css,
+    )
+
+
+def render_badges_pdf(
+    attendees: list[dict[str, Any]],
+    event_name: str,
+    event_date: str = "",
+    template_name: str = "business",
+    custom_html: str | None = None,
+    custom_css: str | None = None,
+    output_path: str | Path | None = None,
+) -> bytes:
+    """Render badges as PDF bytes.
+
+    Args:
+        attendees: List of attendee dicts.
+        event_name: Event display name.
+        event_date: Optional date string.
+        template_name: Built-in template key.
+        custom_html: Optional custom Jinja2 HTML.
+        custom_css: Optional custom CSS.
+        output_path: If provided, also write PDF to this file path.
+
+    Returns:
+        PDF content as bytes.
+    """
+    from weasyprint import HTML  # lazy import — heavy dependency
+
+    html_str = render_badges_html(
+        attendees=attendees,
+        event_name=event_name,
+        event_date=event_date,
+        template_name=template_name,
+        custom_html=custom_html,
+        custom_css=custom_css,
+    )
+
+    pdf_bytes = HTML(string=html_str).write_pdf()
+
+    if output_path:
+        Path(output_path).write_bytes(pdf_bytes)
+
+    return pdf_bytes

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ event_name }} — 签到</title>
+<style>
+{{ css }}
+</style>
+</head>
+<body>
+<div class="container">
+  <header class="header">
+    <h1 class="event-title">{{ event_name }}</h1>
+    {% if event_date %}<p class="event-date">{{ event_date }}</p>{% endif %}
+    {% if event_location %}<p class="event-location">📍 {{ event_location }}</p>{% endif %}
+  </header>
+
+  {% if mode == "qr" %}
+  <section class="qr-section">
+    <div class="qr-frame">
+      <div class="qr-placeholder" id="qr-scanner">
+        <p>📷 扫描二维码签到</p>
+      </div>
+    </div>
+    <p class="hint">请将二维码对准扫描框</p>
+  </section>
+  {% else %}
+  <section class="name-section">
+    <form class="search-form" id="checkin-form">
+      <input type="text" class="search-input" placeholder="请输入您的姓名" autocomplete="off">
+      <button type="submit" class="search-btn">签到</button>
+    </form>
+  </section>
+  {% endif %}
+
+  <section class="stats">
+    <div class="stat-card">
+      <span class="stat-num" id="total">{{ total }}</span>
+      <span class="stat-label">总人数</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-num checked" id="checked">{{ checked_in }}</span>
+      <span class="stat-label">已签到</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-num" id="rate">{{ rate }}%</span>
+      <span class="stat-label">签到率</span>
+    </div>
+  </section>
+
+  <div class="result" id="result" style="display:none;"></div>
+</div>
+</body>
+</html>

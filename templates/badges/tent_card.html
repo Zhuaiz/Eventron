@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+{{ css }}
+</style>
+</head>
+<body>
+{% for attendee in attendees %}
+<div class="tent-card">
+  <div class="front">
+    <div class="attendee-name">{{ attendee.name }}</div>
+    {% if attendee.title %}<div class="attendee-title">{{ attendee.title }}</div>{% endif %}
+    {% if attendee.organization %}<div class="attendee-org">{{ attendee.organization }}</div>{% endif %}
+  </div>
+  <div class="fold-line"></div>
+  <div class="back">
+    <div class="attendee-name">{{ attendee.name }}</div>
+    {% if attendee.title %}<div class="attendee-title">{{ attendee.title }}</div>{% endif %}
+  </div>
+</div>
+{% endfor %}
+</body>
+</html>

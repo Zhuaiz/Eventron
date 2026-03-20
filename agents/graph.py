@@ -36,13 +36,31 @@ def build_graph(
     graph = StateGraph(AgentState)
 
     # ── Orchestrator node ────────────────────────────────────
+    # ── Scope → plugin name mapping ─────────────────────────
+    _SCOPE_MAP = {
+        "badge": "badge",
+        "checkin": "checkin",
+        "seating": "seating",
+        "organizer": "organizer",
+        "planner": "planner",
+    }
+
     async def _orchestrator(state: AgentState) -> dict[str, Any]:
-        # If attachments present and no plan yet, go straight to planner
+        # 1) Forced scope → route directly to that plugin
+        scope = state.get("scope")
+        if scope:
+            target = _SCOPE_MAP.get(scope)
+            if target and registry.get(target) is not None:
+                return {"current_plugin": target}
+
+        # 2) Attachments present and no plan yet → planner
         attachments = state.get("attachments") or []
         task_plan = state.get("task_plan") or []
         if attachments and not task_plan:
             if registry.get("planner") is not None:
                 return {"current_plugin": "planner"}
+
+        # 3) Normal LLM-based intent routing
         return await orchestrator_node(state, registry, llm)
 
     graph.add_node("orchestrator", _orchestrator)

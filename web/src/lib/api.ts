@@ -213,6 +213,12 @@ export class ApiClient {
     return `${API_BASE}/v1/events/${eventId}/export/seatmap`;
   }
 
+  getExportBadgesUrl(eventId: string, templateName = 'business', templateId?: string) {
+    const params = new URLSearchParams({ template_name: templateName });
+    if (templateId) params.set('template_id', templateId);
+    return `${API_BASE}/v1/events/${eventId}/export/badges?${params}`;
+  }
+
   // ── Event Files ──────────────────────────────────────────────
   async uploadEventFile(eventId: string, file: File) {
     const formData = new FormData();

@@ -1,0 +1,100 @@
+/* Mobile-first H5 check-in page */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  color: #fff;
+}
+.container {
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 40px 20px 60px;
+}
+.header { text-align: center; margin-bottom: 32px; }
+.event-title {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.event-date, .event-location {
+  font-size: 14px;
+  opacity: 0.8;
+  margin-top: 8px;
+}
+/* QR mode */
+.qr-section { text-align: center; margin-bottom: 32px; }
+.qr-frame {
+  width: 240px;
+  height: 240px;
+  margin: 0 auto;
+  background: rgba(255,255,255,0.1);
+  border-radius: 16px;
+  border: 2px solid rgba(255,255,255,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.qr-placeholder { font-size: 18px; opacity: 0.7; }
+.hint { font-size: 13px; opacity: 0.6; margin-top: 12px; }
+/* Name mode */
+.name-section { margin-bottom: 32px; }
+.search-form { display: flex; gap: 10px; }
+.search-input {
+  flex: 1;
+  padding: 14px 16px;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  background: rgba(255,255,255,0.95);
+  color: #333;
+  outline: none;
+}
+.search-input::placeholder { color: #999; }
+.search-btn {
+  padding: 14px 24px;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  background: #e2b93b;
+  color: #1a1a2e;
+  cursor: pointer;
+}
+/* Stats */
+.stats {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+.stat-card {
+  flex: 1;
+  background: rgba(255,255,255,0.12);
+  backdrop-filter: blur(8px);
+  border-radius: 12px;
+  padding: 16px 8px;
+  text-align: center;
+}
+.stat-num {
+  display: block;
+  font-size: 28px;
+  font-weight: 700;
+}
+.stat-num.checked { color: #4ade80; }
+.stat-label {
+  display: block;
+  font-size: 12px;
+  opacity: 0.7;
+  margin-top: 4px;
+}
+/* Result feedback */
+.result {
+  margin-top: 24px;
+  padding: 16px;
+  border-radius: 12px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 600;
+}
+.result.success { background: rgba(74,222,128,0.2); }
+.result.error { background: rgba(248,113,113,0.2); }

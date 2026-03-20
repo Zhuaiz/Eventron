@@ -1,0 +1,54 @@
+/* Tent card — 210mm × 99mm (A4 landscape, folded in half) */
+@page {
+  size: 210mm 99mm;
+  margin: 0;
+}
+body {
+  margin: 0;
+  padding: 0;
+  font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+}
+.tent-card {
+  width: 210mm;
+  height: 99mm;
+  page-break-after: always;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.front, .back {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 5mm;
+}
+.front {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+}
+.back {
+  background: #f8f9fa;
+  color: #333;
+  transform: rotate(180deg);
+}
+.fold-line {
+  height: 0;
+  border-top: 1px dashed #ccc;
+}
+.attendee-name {
+  font-size: 28pt;
+  font-weight: 700;
+  letter-spacing: 2pt;
+}
+.attendee-title {
+  font-size: 12pt;
+  margin-top: 3mm;
+  opacity: 0.85;
+}
+.attendee-org {
+  font-size: 11pt;
+  margin-top: 2mm;
+  opacity: 0.7;
+}
