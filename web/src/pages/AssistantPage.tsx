@@ -75,33 +75,6 @@ export function AssistantPage() {
     return () => ro.disconnect();
   }, [adjustTextareaHeight]);
 
-  const doSend = useCallback((msg: string, files: File[] = []) => {
-    if ((!msg.trim() && files.length === 0) || chatMutation.isPending) return;
-
-    const attachments = files.map((f) => ({
-      name: f.name,
-      type: f.type.startsWith('image/') ? 'image' :
-            f.name.match(/\.(xlsx?|csv)$/i) ? 'excel' :
-            f.name.endsWith('.pdf') ? 'pdf' : 'file',
-    }));
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: 'user' as const,
-        content: msg.trim() || `上传了 ${files.length} 个文件`,
-        timestamp: new Date(),
-        attachments: attachments.length > 0 ? attachments : undefined,
-      },
-    ]);
-    setInput('');
-    setPendingFiles([]);
-    chatMutation.mutate({
-      message: msg.trim() || '请分析这些文件',
-      files,
-    });
-  }, [sessionId, lastEventId, chatMutation]);
-
   const chatMutation = useMutation({
     mutationFn: ({ message, files }: { message: string; files: File[] }) =>
       apiClient.sendAgentChat(message, {
@@ -143,6 +116,33 @@ export function AssistantPage() {
       ]);
     },
   });
+
+  const doSend = useCallback((msg: string, files: File[] = []) => {
+    if ((!msg.trim() && files.length === 0) || chatMutation.isPending) return;
+
+    const attachments = files.map((f) => ({
+      name: f.name,
+      type: f.type.startsWith('image/') ? 'image' :
+            f.name.match(/\.(xlsx?|csv)$/i) ? 'excel' :
+            f.name.endsWith('.pdf') ? 'pdf' : 'file',
+    }));
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: 'user' as const,
+        content: msg.trim() || `上传了 ${files.length} 个文件`,
+        timestamp: new Date(),
+        attachments: attachments.length > 0 ? attachments : undefined,
+      },
+    ]);
+    setInput('');
+    setPendingFiles([]);
+    chatMutation.mutate({
+      message: msg.trim() || '请分析这些文件',
+      files,
+    });
+  }, [chatMutation]);
 
   const handleSend = () => {
     doSend(input, [...pendingFiles]);
