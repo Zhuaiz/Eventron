@@ -65,6 +65,15 @@ def create_app() -> FastAPI:
     app.include_router(event_files_router, prefix="/api/v1", tags=["event-files"])
     app.include_router(agent_chat_router, prefix="/api/v1/agent", tags=["agent"])
 
+    # ── Public Routes (no JWT) ──────────────────────────────────
+    from app.api.public_checkin import router as public_checkin_router
+
+    app.include_router(
+        public_checkin_router,
+        prefix="/p/{event_id}",
+        tags=["public-checkin"],
+    )
+
     @app.get("/health")
     async def health() -> dict:
         return {"status": "ok"}

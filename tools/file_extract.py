@@ -15,6 +15,21 @@ from pathlib import Path
 from typing import Any
 
 
+def _detect_image_mime(data: bytes, filename: str = "") -> str:
+    """Detect actual image MIME from file header magic bytes."""
+    if data[:8] == b'\x89PNG\r\n\x1a\n':
+        return "image/png"
+    if data[:2] == b'\xff\xd8':
+        return "image/jpeg"
+    if data[:4] == b'GIF8':
+        return "image/gif"
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return "image/webp"
+    if data[:2] == b'BM':
+        return "image/bmp"
+    return mimetypes.guess_type(filename)[0] or "image/png"
+
+
 def build_vision_prompt(filename: str) -> str:
     """Build an LLM prompt for extracting event info from an image.
 
@@ -70,9 +85,9 @@ def build_vision_message(
     if not path.exists():
         raise FileNotFoundError(f"Image not found: {image_path}")
 
-    mime_type = mimetypes.guess_type(filename)[0] or "image/png"
-    with open(path, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode("utf-8")
+    raw = path.read_bytes()
+    mime_type = _detect_image_mime(raw, filename)
+    b64 = base64.b64encode(raw).decode("utf-8")
 
     system_prompt = build_vision_prompt(filename)
 

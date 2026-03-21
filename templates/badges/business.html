@@ -9,19 +9,21 @@
 <body>
 {% for attendee in attendees %}
 <div class="badge">
+  <div class="badge-deco-top"></div>
   <div class="badge-header">
     <div class="event-name">{{ event_name }}</div>
     {% if event_date %}<div class="event-date">{{ event_date }}</div>{% endif %}
   </div>
-  <div class="badge-body">
+  <div class="name-band">
     <div class="attendee-name">{{ attendee.name }}</div>
     {% if attendee.title %}<div class="attendee-title">{{ attendee.title }}</div>{% endif %}
     {% if attendee.organization %}<div class="attendee-org">{{ attendee.organization }}</div>{% endif %}
   </div>
   <div class="badge-footer">
-    <span class="role-tag role-{{ attendee.role }}">{{ attendee.role_label }}</span>
+    <span class="role-tag" style="background:{{ attendee.role_color }};color:{{ attendee.role_text }}">{{ attendee.role_label }}</span>
     {% if attendee.qr_data %}<img class="qr" src="{{ attendee.qr_data }}" alt="QR">{% endif %}
   </div>
+  <div class="accent-bar"></div>
 </div>
 {% endfor %}
 </body>

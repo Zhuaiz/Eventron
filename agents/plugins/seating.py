@@ -1,135 +1,89 @@
-"""Seating Agent — venue layout generation, zone painting, seat assignment.
+"""Seating Agent — LangChain tool-calling ReAct agent for venue layouts.
 
-Handles seating-related requests using the SeatingService and
-EventService from the injected services dict.  Supports:
+Uses `bind_tools()` + ReAct loop instead of hardcoded keyword routing.
+The LLM decides WHEN and WHICH tools to call based on the conversation.
+
+Capabilities (all via tools):
   - Layout generation (grid / theater / roundtable / banquet / u_shape / classroom)
-  - Zone assignment (bulk zone painting via chat)
-  - Auto-assign with priority_first / random / by_department / by_zone strategies
+  - Custom layouts (variable seats per row)
+  - Zone assignment (bulk zone painting)
+  - Auto-assign with multiple strategies
   - Seat map overview
+  - Excel file reading + attendee import
+  - Attendee listing
 """
 
 from __future__ import annotations
 
-import re
-import uuid
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agents.plugins.base import AgentPlugin
+from agents.react import react_loop
 from agents.state import AgentState
+from agents.tools.seating_tools import make_seating_tools
 
 # ---------------------------------------------------------------------------
-# Layout / strategy / zone keyword maps
+# System prompt — tells the LLM what it can do and how to behave
 # ---------------------------------------------------------------------------
 
-_LAYOUT_KEYWORDS: dict[str, str] = {
-    "圆桌": "roundtable",
-    "roundtable": "roundtable",
-    "round": "roundtable",
-    "剧院": "theater",
-    "theater": "theater",
-    "theatre": "theater",
-    "弧形": "theater",
-    "U形": "u_shape",
-    "u_shape": "u_shape",
-    "u-shape": "u_shape",
-    "U型": "u_shape",
-    "课桌": "classroom",
-    "classroom": "classroom",
-    "教室": "classroom",
-    "宴会": "banquet",
-    "banquet": "banquet",
-    "长桌": "banquet",
-    "网格": "grid",
-    "grid": "grid",
-    "方阵": "grid",
-}
+_SYSTEM = """\
+你是 Eventron 座位管理助手，帮助用户进行会场座位布局和管理。
 
-_STRATEGY_KEYWORDS: dict[str, str] = {
-    "随机": "random",
-    "random": "random",
-    "优先": "priority_first",
-    "priority": "priority_first",
-    "重要": "priority_first",
-    "部门": "by_department",
-    "department": "by_department",
-    "分区排": "by_zone",
-    "按区": "by_zone",
-    "zone": "by_zone",
-}
+## 你的能力（通过工具调用实现）
 
-_LAYOUT_LABELS: dict[str, str] = {
-    "grid": "网格",
-    "theater": "剧院弧形",
-    "roundtable": "圆桌",
-    "banquet": "宴会长桌",
-    "u_shape": "U形",
-    "classroom": "课桌式",
-}
+1. **查看信息**: 查看活动信息、座位状态、参会者名单（含座位详情）
+2. **创建布局**: 支持 grid/theater/roundtable/banquet/u_shape/classroom 六种布局
+3. **自定义布局**: 每排座位数可不同，支持分区
+4. **分区管理**: 按排号设置分区，或给未分区座位批量设置
+5. **自动排座**: 支持 priority_first/random/by_department/by_zone 策略
+6. **换座/调座**: 交换两位参会者的座位、将某人移到指定座位、取消座位分配
+7. **Excel 分析**: 读取上传的 Excel 文件，提取布局和人员信息
+8. **导入参会者**: 从 Excel 或用户描述批量导入参会者
 
-# Regex to extract numbers like "10排8列", "10x8", "10行8列", "rows=10 cols=8"
-_DIM_RE = re.compile(
-    r"(\d+)\s*[排行rows]*\s*[×xX*]\s*(\d+)\s*[列cols]*"
-    r"|(\d+)\s*排\s*(\d+)\s*列"
-    r"|(\d+)\s*行\s*(\d+)\s*列"
-)
+## 工作流程
 
-_TABLE_SIZE_RE = re.compile(r"(\d+)\s*人[一/每]*桌|桌\s*(\d+)\s*人|table.?size\s*(\d+)", re.I)
+- 每次操作后，调用 `view_seats` 验证结果
+- 换座/调座前，先调用 `list_attendees_with_seats` 查看当前座位分配
+- 如果用户提到"文件"、"座位表"、"名单"，先调用 `read_event_excel` 查看内容
+- 从 Excel 读取到人员信息后，主动调用 `import_attendees` 导入
+- 创建布局时，根据用户描述（如"正方形"→行列相等）推算合理的行列数
+- 如果用户要求不明确，先查看现有信息再做决策
 
+## 换座操作说明
 
-def _parse_dims(text: str) -> tuple[int, int] | None:
-    """Extract (rows, cols) from natural language."""
-    m = _DIM_RE.search(text)
-    if not m:
-        return None
-    groups = m.groups()
-    for i in range(0, len(groups), 2):
-        if groups[i] and groups[i + 1]:
-            return int(groups[i]), int(groups[i + 1])
-    return None
+- **交换两人座位**: 调用 `swap_two_attendees(name_a, name_b)` — 两人互换
+- **移动某人到指定座位**: 调用 `reassign_attendee_seat(name, target_seat_label)`
+- **取消某人座位**: 调用 `unassign_attendee(name)`
+- 换座前建议先调用 `list_attendees_with_seats` 确认当前座位情况
+- 随机交换：先查看参会者列表，随机选两人调用 `swap_two_attendees`
 
+## 布局类型说明
 
-def _parse_table_size(text: str) -> int | None:
-    m = _TABLE_SIZE_RE.search(text)
-    if not m:
-        return None
-    for g in m.groups():
-        if g:
-            return int(g)
-    return None
+- **grid**: 标准网格，适合会议室
+- **theater**: 弧形剧院式，适合演讲
+- **roundtable**: 圆桌，适合讨论（需指定 table_size）
+- **banquet**: 宴会长桌
+- **u_shape**: U 形会议桌
+- **classroom**: 教室课桌式
 
+## 注意事项
 
-def _detect_layout(text: str) -> str | None:
-    lower = text.lower()
-    for kw, layout in _LAYOUT_KEYWORDS.items():
-        if kw.lower() in lower:
-            return layout
-    return None
-
-
-def _detect_strategy(text: str) -> str:
-    lower = text.lower()
-    for kw, strat in _STRATEGY_KEYWORDS.items():
-        if kw in lower:
-            return strat
-    return "priority_first"
-
-
-def _detect_zone(text: str) -> str | None:
-    """Extract zone name from text like '设为贵宾区' / '标记为嘉宾区'."""
-    m = re.search(r"[设标划归].*?[为成入][\s「「]*([\w]+区)", text)
-    if m:
-        return m.group(1)
-    # Also match bare zone names
-    for zone in ("贵宾区", "嘉宾区", "普通区", "VIP区", "媒体区", "工作区"):
-        if zone in text:
-            return zone
-    return None
+- 用中文回复用户
+- 操作完成后简洁汇报结果
+- 遇到错误时说明原因并建议解决方案
+- 如果需要更多信息，直接问用户
+"""
 
 
 class SeatingPlugin(AgentPlugin):
-    """Manages venue layout, zone painting, and seat assignment strategies."""
+    """Tool-calling ReAct agent for seating management.
+
+    Instead of hardcoded keyword routing, the LLM decides which tools
+    to call based on conversation context. Uses ``react_loop()`` for
+    the reason-act-observe cycle.
+    """
 
     @property
     def name(self) -> str:
@@ -138,21 +92,23 @@ class SeatingPlugin(AgentPlugin):
     @property
     def description(self) -> str:
         return (
-            "Manage venue layout (6 types), zone painting, "
-            "and auto-assign seats (priority/random/department/zone)"
+            "Manage venue seating: create layouts (6 types), "
+            "paint zones, auto-assign seats, import attendees, "
+            "read Excel seat charts"
         )
 
     @property
     def intent_keywords(self) -> list[str]:
         return [
-            "排座", "座位", "assign", "seating", "布局", "layout",
-            "自动排", "座位图", "生成座位", "圆桌", "剧院", "U形",
-            "课桌", "宴会", "分区", "zone", "贵宾区", "嘉宾区",
-            "优先排座", "网格", "弧形", "长桌",
+            "座位", "seat", "layout", "布局", "排座", "分区", "zone",
+            "排列", "圆桌", "剧院", "U形", "课桌", "宴会",
+            "自动分配", "assign", "座位表", "席位",
+            "换座", "swap", "调座", "换位", "互换", "移座",
         ]
 
     @property
     def tools(self) -> list:
+        # Tools are built dynamically in handle() with services bound
         return []
 
     @property
@@ -160,355 +116,73 @@ class SeatingPlugin(AgentPlugin):
         return "smart"
 
     async def handle(self, state: AgentState) -> dict[str, Any]:
-        """Route seating sub-intents to appropriate handlers."""
+        """Run the seating agent as a ReAct tool-calling loop.
+
+        Flow:
+        1. Build LangChain tools with services bound via closure
+        2. Bind tools to LLM
+        3. Construct message history (system + conversation)
+        4. Run ReAct loop — LLM drives all decisions
+        5. Return final response
+        """
         event_id = state.get("event_id")
         if not event_id:
-            reply = (
-                "请先告诉我是哪个活动的排座？"
-                "您可以说活动名称，或者我帮您创建一个新活动。"
-            )
+            reply = "请先选择一个活动，我才能管理座位。"
             return {
                 "messages": [AIMessage(content=reply)],
                 "turn_output": reply,
             }
 
-        last_msg = ""
-        for msg in reversed(state["messages"]):
-            if isinstance(msg, HumanMessage):
-                last_msg = msg.content
-                break
-
-        seat_svc = self.seat_svc
-        event_svc = self.event_svc
-
-        # --- Sub-intent routing (order matters) ---
-
-        # 1. Layout generation: "生成剧院式布局 10排20列"
-        if any(kw in last_msg for kw in [
-            "生成", "创建座位", "generate", "布局", "layout",
-            "圆桌", "剧院", "U形", "课桌", "宴会", "网格", "弧形", "长桌",
-        ]):
-            layout = _detect_layout(last_msg)
-            if layout:
-                return await self._generate_layout(
-                    event_id, event_svc, seat_svc, last_msg, layout
-                )
-            # No layout type detected — check if they just want a basic grid
-            if any(kw in last_msg for kw in ["生成", "创建座位", "generate"]):
-                return await self._generate_layout(
-                    event_id, event_svc, seat_svc, last_msg, "grid"
-                )
-
-        # 2. Zone operations: "把前两排设为贵宾区"
-        if any(kw in last_msg for kw in ["分区", "zone", "区域", "设为", "标记", "划为"]):
-            zone_name = _detect_zone(last_msg)
-            if zone_name:
-                return await self._set_zone(event_id, seat_svc, last_msg, zone_name)
-            return await self._zone_help(event_id, seat_svc)
-
-        # 3. Auto-assign: "自动排座 / 按优先级分配"
-        if any(kw in last_msg for kw in [
-            "自动排", "auto", "分配", "排座",
-            "随机", "优先", "部门", "priority",
-        ]):
-            strategy = _detect_strategy(last_msg)
-            return await self._auto_assign(event_id, seat_svc, strategy)
-
-        # 4. View seat map
-        if any(kw in last_msg for kw in ["查看", "座位图", "view", "map", "概况"]):
-            return await self._view_seats(event_id, seat_svc)
-
-        # 5. General help
-        reply = (
-            "好的，关于排座我可以帮您：\n"
-            "1. **生成座位布局** — 支持6种布局：网格、剧院弧形、圆桌、"
-            "宴会长桌、U形、课桌式\n"
-            "   例：「生成剧院式布局 10排20列」\n"
-            "2. **座位分区** — 把指定区域设为贵宾区/嘉宾区等\n"
-            "   例：「把前3排设为贵宾区」\n"
-            "3. **自动排座** — 按优先级/随机/部门/分区\n"
-            "   例：「按优先级自动排座」\n"
-            "4. **查看座位图** — 当前座位分配情况\n\n"
-            "请问需要哪项操作？"
+        # Build tools with services bound
+        seat_tools = make_seating_tools(
+            event_id=event_id,
+            seat_svc=self.seat_svc,
+            event_svc=self.event_svc,
+            attendee_svc=self.attendee_svc,
         )
-        return {
-            "messages": [AIMessage(content=reply)],
-            "turn_output": reply,
-        }
 
-    # ------------------------------------------------------------------
-    # Layout generation
-    # ------------------------------------------------------------------
-
-    async def _generate_layout(
-        self,
-        event_id: str,
-        event_svc,
-        seat_svc,
-        msg: str,
-        layout_type: str,
-    ) -> dict[str, Any]:
-        if not event_svc or not seat_svc:
-            reply = "服务未就绪，请稍后再试。"
+        # Get LLM and bind tools
+        llm = self.get_llm("smart")
+        if not llm:
+            reply = "LLM 服务不可用，请稍后重试。"
             return {
                 "messages": [AIMessage(content=reply)],
                 "turn_output": reply,
             }
-        try:
-            eid = uuid.UUID(event_id)
-            event = await event_svc.get_event(eid)
 
-            # Parse dimensions from message, fall back to event venue dims
-            dims = _parse_dims(msg)
-            rows = dims[0] if dims else event.venue_rows
-            cols = dims[1] if dims else event.venue_cols
-            if rows <= 0 or cols <= 0:
-                rows, cols = 10, 10  # sensible default
+        llm_with_tools = llm.bind_tools(seat_tools)
 
-            table_size = _parse_table_size(msg) or 8
-            label = _LAYOUT_LABELS.get(layout_type, layout_type)
+        # Build message list: system + recent conversation history
+        messages: list[Any] = [
+            {"role": "system", "content": _SYSTEM},
+        ]
 
-            seats = await seat_svc.create_venue_layout(
-                eid,
-                layout_type=layout_type,
-                rows=rows,
-                cols=cols,
-                table_size=table_size,
-                replace=True,
-            )
-            reply = (
-                f"已生成 **{label}** 布局，共 {len(seats)} 个座位"
-                f"（{rows}排 × {cols}列"
-            )
-            if layout_type in ("roundtable", "banquet"):
-                reply += f"，每桌{table_size}人"
-            reply += "）。\n请在「座位图」标签页查看并调整。"
+        # Include recent conversation for context (last 10 messages)
+        conv_messages = state.get("messages", [])
+        for msg in conv_messages[-10:]:
+            if isinstance(msg, HumanMessage):
+                messages.append(msg)
+            elif isinstance(msg, AIMessage):
+                # Only include text content, skip tool calls from
+                # previous turns to avoid confusion
+                if msg.content:
+                    messages.append(
+                        AIMessage(content=msg.content)
+                    )
 
-        except Exception as e:
-            reply = f"生成布局失败：{e}"
+        # Run ReAct loop — LLM decides what to do
+        result = await react_loop(
+            llm_with_tools,
+            messages,
+            seat_tools,
+            max_iter=10,
+        )
+
+        reply = result.content or "操作完成。"
+        # Collect tool call log for frontend display
+        tool_call_log = getattr(result, "tool_call_log", [])
         return {
             "messages": [AIMessage(content=reply)],
             "turn_output": reply,
-        }
-
-    # ------------------------------------------------------------------
-    # Zone operations
-    # ------------------------------------------------------------------
-
-    async def _set_zone(
-        self,
-        event_id: str,
-        seat_svc,
-        msg: str,
-        zone_name: str,
-    ) -> dict[str, Any]:
-        """Set zone on seats based on natural language row/position description."""
-        if not seat_svc:
-            reply = "服务未就绪，请稍后再试。"
-            return {
-                "messages": [AIMessage(content=reply)],
-                "turn_output": reply,
-            }
-        try:
-            eid = uuid.UUID(event_id)
-            seats = await seat_svc.get_seats(eid)
-            if not seats:
-                reply = "该活动还没有座位，请先生成座位布局。"
-                return {
-                    "messages": [AIMessage(content=reply)],
-                    "turn_output": reply,
-                }
-
-            # Parse row range from message: "前3排", "第1-3排", "后两排"
-            target_ids = self._select_seats_by_description(seats, msg)
-
-            if not target_ids:
-                reply = (
-                    f"未能确定要设为「{zone_name}」的座位范围。\n"
-                    "请说明具体范围，例如：\n"
-                    "- 「把前3排设为贵宾区」\n"
-                    "- 「第1-5排设为嘉宾区」\n"
-                    "- 「后两排设为普通区」\n"
-                    "或者在座位图上框选后操作。"
-                )
-            else:
-                count = await seat_svc.bulk_update_zone(target_ids, zone_name)
-                reply = (
-                    f"已将 {count} 个座位设为 **{zone_name}**。\n"
-                    "请在「座位图」标签页查看效果。"
-                )
-        except Exception as e:
-            reply = f"分区设置失败：{e}"
-        return {
-            "messages": [AIMessage(content=reply)],
-            "turn_output": reply,
-        }
-
-    async def _zone_help(
-        self, event_id: str, seat_svc
-    ) -> dict[str, Any]:
-        """Show zone overview and suggestions."""
-        try:
-            eid = uuid.UUID(event_id)
-            seats = await seat_svc.get_seats(eid)
-            if not seats:
-                reply = "该活动还没有座位，请先生成座位布局再进行分区。"
-            else:
-                zones: dict[str | None, int] = {}
-                for s in seats:
-                    z = getattr(s, "zone", None)
-                    zones[z] = zones.get(z, 0) + 1
-
-                lines = [f"当前共 {len(seats)} 个座位，分区情况："]
-                for z, cnt in sorted(
-                    zones.items(), key=lambda x: (x[0] is None, x[0])
-                ):
-                    label = z or "未分区"
-                    lines.append(f"  · {label}：{cnt} 个")
-
-                lines.append("\n您可以说：")
-                lines.append("- 「把前3排设为贵宾区」")
-                lines.append("- 「第4-8排设为嘉宾区」")
-                lines.append("- 「剩余座位设为普通区」")
-                reply = "\n".join(lines)
-        except Exception as e:
-            reply = f"查询分区失败：{e}"
-        return {
-            "messages": [AIMessage(content=reply)],
-            "turn_output": reply,
-        }
-
-    @staticmethod
-    def _select_seats_by_description(
-        seats: list, msg: str
-    ) -> list[uuid.UUID]:
-        """Parse row descriptions and return matching seat IDs."""
-        if not seats:
-            return []
-
-        max_row = max(s.row_num for s in seats)
-        target_rows: set[int] = set()
-
-        # "前N排"
-        m = re.search(r"前\s*(\d+)\s*排", msg)
-        if m:
-            n = int(m.group(1))
-            target_rows = set(range(1, min(n + 1, max_row + 1)))
-
-        # "后N排"
-        if not target_rows:
-            m = re.search(r"后\s*(\d+)\s*排", msg)
-            if m:
-                n = int(m.group(1))
-                target_rows = set(range(max(1, max_row - n + 1), max_row + 1))
-
-        # "第X排" or "第X-Y排"
-        if not target_rows:
-            m = re.search(r"第\s*(\d+)\s*[-到至]\s*(\d+)\s*排", msg)
-            if m:
-                a, b = int(m.group(1)), int(m.group(2))
-                target_rows = set(range(a, b + 1))
-            else:
-                m = re.search(r"第\s*(\d+)\s*排", msg)
-                if m:
-                    target_rows = {int(m.group(1))}
-
-        # "剩余" / "其余" — seats with no zone
-        if not target_rows and any(kw in msg for kw in ["剩余", "其余", "剩下", "其他"]):
-            return [
-                s.id for s in seats
-                if getattr(s, "zone", None) is None
-            ]
-
-        if not target_rows:
-            return []
-
-        return [s.id for s in seats if s.row_num in target_rows]
-
-    # ------------------------------------------------------------------
-    # Auto-assign
-    # ------------------------------------------------------------------
-
-    async def _auto_assign(
-        self, event_id: str, seat_svc, strategy: str
-    ) -> dict[str, Any]:
-        if not seat_svc:
-            reply = "服务未就绪，请稍后再试。"
-            return {
-                "messages": [AIMessage(content=reply)],
-                "turn_output": reply,
-            }
-        label = {
-            "random": "随机",
-            "priority_first": "优先级优先",
-            "by_department": "按部门",
-            "by_zone": "按分区",
-        }.get(strategy, strategy)
-        try:
-            assignments = await seat_svc.auto_assign(
-                uuid.UUID(event_id), strategy=strategy
-            )
-            if not assignments:
-                reply = "没有需要分配的参会者（都已有座位或没有参会者）。"
-            else:
-                reply = (
-                    f"排座完成！策略：**{label}**，"
-                    f"共分配 {len(assignments)} 个座位。\n"
-                    "请在「座位图」标签页查看结果。"
-                )
-        except Exception as e:
-            reply = f"排座失败：{e}"
-        return {
-            "messages": [AIMessage(content=reply)],
-            "turn_output": reply,
-        }
-
-    # ------------------------------------------------------------------
-    # View seats
-    # ------------------------------------------------------------------
-
-    async def _view_seats(
-        self, event_id: str, seat_svc
-    ) -> dict[str, Any]:
-        if not seat_svc:
-            reply = "服务未就绪，请稍后再试。"
-            return {
-                "messages": [AIMessage(content=reply)],
-                "turn_output": reply,
-            }
-        try:
-            seats = await seat_svc.get_seats(uuid.UUID(event_id))
-            if not seats:
-                reply = (
-                    "该活动还没有座位。\n"
-                    "要生成座位布局吗？支持6种类型：\n"
-                    "网格、剧院弧形、圆桌、宴会长桌、U形、课桌式"
-                )
-            else:
-                occupied = sum(1 for s in seats if s.attendee_id)
-                total = len(seats)
-                zones: dict[str | None, int] = {}
-                for s in seats:
-                    z = getattr(s, "zone", None)
-                    zones[z] = zones.get(z, 0) + 1
-
-                reply = (
-                    f"当前座位概况：共 {total} 个座位，"
-                    f"已分配 {occupied} 个，空闲 {total - occupied} 个。\n"
-                )
-                if any(z is not None for z in zones):
-                    zone_parts = []
-                    for z, cnt in sorted(
-                        zones.items(), key=lambda x: (x[0] is None, x[0])
-                    ):
-                        if z:
-                            zone_parts.append(f"{z}({cnt})")
-                    if zone_parts:
-                        reply += f"分区：{'、'.join(zone_parts)}\n"
-                reply += "请在「座位图」标签页查看详细可视化。"
-        except Exception as e:
-            reply = f"查询失败：{e}"
-        return {
-            "messages": [AIMessage(content=reply)],
-            "turn_output": reply,
+            "tool_calls": tool_call_log,
         }

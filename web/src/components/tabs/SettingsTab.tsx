@@ -9,23 +9,12 @@ interface SettingsTabProps {
   event: any;
 }
 
-const LAYOUT_TYPES = [
-  { value: 'theater', label: '剧院式' },
-  { value: 'classroom', label: '教室式' },
-  { value: 'roundtable', label: '圆桌式' },
-  { value: 'banquet', label: '宴会式' },
-  { value: 'u_shape', label: 'U字形' },
-];
-
 export function SettingsTab({ eventId, event }: SettingsTabProps) {
   const [name, setName] = useState(event.name);
   const [eventDate, setEventDate] = useState(
     event.event_date ? event.event_date.split('T')[0] : ''
   );
   const [location, setLocation] = useState(event.location || '');
-  const [layoutType, setLayoutType] = useState(event.layout_type || 'classroom');
-  const [venueRows, setVenueRows] = useState(event.venue_rows);
-  const [venueCols, setVenueCols] = useState(event.venue_cols);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -38,9 +27,6 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
         name,
         event_date: eventDate,
         location,
-        layout_type: layoutType,
-        venue_rows: parseInt(String(venueRows)),
-        venue_cols: parseInt(String(venueCols)),
       });
     },
     onSuccess: () => {
@@ -105,7 +91,7 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-2xl">
       {/* Status */}
       <div className="bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">活动状态</h3>
@@ -137,6 +123,9 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
       {/* Basic Info */}
       <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6 space-y-4">
         <h3 className="text-lg font-semibold text-gray-900">基本信息</h3>
+        <p className="text-xs text-gray-500 -mt-2">
+          座位布局、行列数请在「座位图」标签页中管理
+        </p>
 
         {/* Name */}
         <div>
@@ -178,54 +167,6 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
             disabled={event.status !== 'draft'}
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-500"
           />
-        </div>
-
-        {/* Layout Type */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            场景布局
-          </label>
-          <select
-            value={layoutType}
-            onChange={(e) => setLayoutType(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            {LAYOUT_TYPES.map((type) => (
-              <option key={type.value} value={type.value}>
-                {type.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Venue Dimensions — always editable */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              座位行数
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="200"
-              value={venueRows}
-              onChange={(e) => setVenueRows(parseInt(e.target.value) || 0)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              座位列数
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="200"
-              value={venueCols}
-              onChange={(e) => setVenueCols(parseInt(e.target.value) || 0)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
         </div>
 
         {/* Messages */}

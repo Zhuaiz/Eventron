@@ -47,6 +47,37 @@ class AgentPlugin(ABC):
             return factory(tier or self.llm_model or "smart")
         return None
 
+    @staticmethod
+    def get_event_files(
+        event_id: str, file_type: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Look up files from the event's file store.
+
+        Args:
+            event_id: UUID string of the event.
+            file_type: Optional filter — 'excel', 'image', 'pdf'.
+
+        Returns:
+            List of file entries with 'path', 'filename', 'type' keys.
+        """
+        try:
+            from tools.event_files import (
+                find_files_by_type,
+                load_manifest,
+                event_dir,
+            )
+            if file_type:
+                return find_files_by_type(event_id, file_type)
+            manifest = load_manifest(event_id)
+            edir = event_dir(event_id)
+            return [
+                {**e, "path": str(edir / e["stored_name"])}
+                for e in manifest
+                if (edir / e["stored_name"]).exists()
+            ]
+        except Exception:
+            return []
+
     # ── Abstract interface ─────────────────────────────────────
     @property
     @abstractmethod

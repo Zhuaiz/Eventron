@@ -3,7 +3,8 @@
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 
 from app.deps import get_badge_template_service
 from app.schemas.badge_template import (
@@ -44,6 +45,50 @@ async def list_builtins(
     """List all built-in templates."""
     templates = await svc.list_builtins()
     return [BadgeTemplateResponse.model_validate(t) for t in templates]
+
+
+@router.get("/preview")
+async def preview_template(
+    template_id: str | None = Query(None),
+    template_name: str = Query("conference"),
+    svc: BadgeTemplateService = Depends(get_badge_template_service),
+):
+    """Preview a template with sample data — no event required.
+
+    Use for the global template management page where there's no eventId.
+    """
+    from tools.badge_render import render_badges_html
+
+    sample = [{
+        "name": "张三",
+        "title": "产品总监",
+        "organization": "示例科技有限公司",
+        "role": "嘉宾",
+        "priority": 5,
+    }]
+
+    custom_html = None
+    custom_css = None
+    if template_id:
+        tpl = await svc.get_template(uuid.UUID(template_id))
+        if tpl:
+            custom_html = tpl.html_template
+            custom_css = tpl.css
+            template_name = tpl.template_type or "conference"
+
+    html_str = render_badges_html(
+        attendees=sample,
+        event_name="示例活动 · 年度峰会",
+        event_date="2026年3月23日",
+        template_name=template_name,
+        custom_html=custom_html,
+        custom_css=custom_css,
+    )
+
+    return Response(
+        content=html_str,
+        media_type="text/html; charset=utf-8",
+    )
 
 
 @router.get("/{template_id}", response_model=BadgeTemplateResponse)

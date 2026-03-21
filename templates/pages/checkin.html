@@ -2,54 +2,88 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>{{ event_name }} — 签到</title>
 <style>
 {{ css }}
 </style>
 </head>
 <body>
-<div class="container">
+<div class="page" id="app">
+  <!-- Background decoration -->
+  <div class="bg-skyline"></div>
+  <div class="bg-glow"></div>
+
+  <!-- Header -->
   <header class="header">
     <h1 class="event-title">{{ event_name }}</h1>
-    {% if event_date %}<p class="event-date">{{ event_date }}</p>{% endif %}
-    {% if event_location %}<p class="event-location">📍 {{ event_location }}</p>{% endif %}
+    {% if event_date %}<p class="event-meta">{{ event_date }}</p>{% endif %}
+    {% if event_location %}<p class="event-meta loc">{{ event_location }}</p>{% endif %}
   </header>
 
-  {% if mode == "qr" %}
-  <section class="qr-section">
-    <div class="qr-frame">
-      <div class="qr-placeholder" id="qr-scanner">
-        <p>📷 扫描二维码签到</p>
-      </div>
-    </div>
-    <p class="hint">请将二维码对准扫描框</p>
-  </section>
-  {% else %}
-  <section class="name-section">
-    <form class="search-form" id="checkin-form">
-      <input type="text" class="search-input" placeholder="请输入您的姓名" autocomplete="off">
-      <button type="submit" class="search-btn">签到</button>
+  <!-- Search Section -->
+  <section class="search-card" id="search-section">
+    <form class="search-form" id="checkin-form" onsubmit="return false;">
+      <input
+        type="text"
+        class="search-input"
+        id="name-input"
+        placeholder="请输入您的姓名"
+        autocomplete="off"
+        autofocus
+      >
+      <button type="button" class="search-btn" id="search-btn" onclick="doSearch()">
+        搜索
+      </button>
     </form>
   </section>
-  {% endif %}
 
-  <section class="stats">
-    <div class="stat-card">
-      <span class="stat-num" id="total">{{ total }}</span>
-      <span class="stat-label">总人数</span>
-    </div>
-    <div class="stat-card">
-      <span class="stat-num checked" id="checked">{{ checked_in }}</span>
-      <span class="stat-label">已签到</span>
-    </div>
-    <div class="stat-card">
-      <span class="stat-num" id="rate">{{ rate }}%</span>
-      <span class="stat-label">签到率</span>
-    </div>
+  <!-- Result Section (hidden by default) -->
+  <section class="result-card" id="result-section" style="display:none;">
+    <!-- Populated by JS -->
   </section>
 
-  <div class="result" id="result" style="display:none;"></div>
+  <!-- Candidates Section (for disambiguation) -->
+  <section class="candidates-card" id="candidates-section" style="display:none;">
+    <p class="cand-title">找到多位同名人员，请选择：</p>
+    <div id="candidates-list"></div>
+  </section>
+
+  <!-- Success Section -->
+  <section class="success-card" id="success-section" style="display:none;">
+    <div class="success-icon">✓</div>
+    <h2 class="success-name" id="success-name"></h2>
+    <p class="success-msg" id="success-msg">签到成功</p>
+    <div class="seat-info" id="seat-info" style="display:none;">
+      <span class="seat-label" id="seat-label"></span>
+    </div>
+    <button class="btn-secondary" onclick="resetPage()">返回</button>
+  </section>
+
+  <!-- Stats bar -->
+  <section class="stats-bar" id="stats-bar">
+    <div class="stat-item">
+      <span class="stat-num" id="stat-total">{{ total }}</span>
+      <span class="stat-lbl">总人数</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat-item">
+      <span class="stat-num accent" id="stat-checked">{{ checked_in }}</span>
+      <span class="stat-lbl">已签到</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat-item">
+      <span class="stat-num" id="stat-rate">{{ rate }}%</span>
+      <span class="stat-lbl">签到率</span>
+    </div>
+  </section>
 </div>
+
+<script>
+var EVENT_ID = "{{ event_id }}";
+</script>
+<script>
+{{ js }}
+</script>
 </body>
 </html>

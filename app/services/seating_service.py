@@ -17,6 +17,7 @@ from tools.seating_engine import (
     assign_seats_priority_first,
     assign_seats_random,
     assign_seats_vip_first,
+    generate_custom_layout,
     generate_layout,
 )
 
@@ -79,6 +80,22 @@ class SeatingService:
             table_size=table_size,
             aisle_every=aisle_every,
         )
+        return await self._seat_repo.bulk_create_from_specs(event_id, specs)
+
+    async def create_custom_layout(
+        self,
+        event_id: uuid.UUID,
+        row_specs: list[dict],
+        *,
+        replace: bool = True,
+    ) -> list[Seat]:
+        """Create layout with variable seats per row.
+
+        Each row_spec: {count, repeat?, spacing?, zone?, label_prefix?}
+        """
+        if replace:
+            await self._seat_repo.delete_by_event(event_id)
+        specs = generate_custom_layout(row_specs)
         return await self._seat_repo.bulk_create_from_specs(event_id, specs)
 
     # ------------------------------------------------------------------

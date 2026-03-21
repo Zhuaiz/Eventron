@@ -20,6 +20,13 @@ def _load_css(name: str) -> str:
     return ""
 
 
+def _load_js(name: str) -> str:
+    js_path = TEMPLATE_DIR / f"{name}.js"
+    if js_path.exists():
+        return js_path.read_text(encoding="utf-8")
+    return ""
+
+
 def render_checkin_page(
     event_name: str,
     event_date: str = "",
@@ -29,6 +36,7 @@ def render_checkin_page(
     checked_in: int = 0,
     custom_html: str | None = None,
     custom_css: str | None = None,
+    event_id: str = "",
 ) -> str:
     """Render a standalone H5 check-in page.
 
@@ -41,16 +49,21 @@ def render_checkin_page(
         checked_in: Already checked-in count.
         custom_html: Optional custom Jinja2 HTML template.
         custom_css: Optional custom CSS.
+        event_id: Event UUID string (injected into JS for API calls).
 
     Returns:
         Complete HTML string (self-contained, can be served or saved).
     """
     rate = round(checked_in / total * 100) if total > 0 else 0
 
+    # Always load the check-in JS — it provides search, check-in,
+    # stats polling, etc.  Custom templates still need this logic.
+    js = _load_js("checkin")
+
     if custom_html:
         env = Environment(autoescape=False)
         tpl = env.from_string(custom_html)
-        css = custom_css or ""
+        css = custom_css or _load_css("checkin")
     else:
         env = Environment(
             loader=FileSystemLoader(str(TEMPLATE_DIR)),
@@ -68,4 +81,6 @@ def render_checkin_page(
         checked_in=checked_in,
         rate=rate,
         css=css,
+        js=js,
+        event_id=event_id,
     )

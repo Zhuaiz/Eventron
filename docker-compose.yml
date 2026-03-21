@@ -33,7 +33,6 @@ services:
     env_file:
       - .env
     environment:
-      # Override localhost → docker service name inside container
       DATABASE_URL: postgresql+asyncpg://eventron:eventron@postgres:5432/eventron
       REDIS_URL: redis://redis:6379/0
     depends_on:
@@ -45,5 +44,20 @@ services:
       - .:/app
     working_dir: /app
 
+  web:
+    image: node:20-alpine
+    command: sh -c "npm install && npx vite --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    working_dir: /app
+    volumes:
+      - ./web:/app
+      - web_node_modules:/app/node_modules
+    environment:
+      VITE_API_BASE: http://app:8000
+    depends_on:
+      - app
+
 volumes:
   pgdata:
+  web_node_modules:

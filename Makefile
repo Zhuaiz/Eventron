@@ -1,17 +1,4 @@
-.PHONY: dev test test-unit test-cov lint migrate fresh help
-
-# ── Development ──────────────────────────────────────────────
-dev:  ## Start FastAPI dev server (先跑 make up 启动数据库)
-	uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-up:  ## Start postgres + redis containers
-	docker compose up -d postgres redis
-
-down:  ## Stop all containers
-	docker compose down
-
-all:  ## Start everything: postgres + redis + app (docker)
-	docker compose up --build
+.PHONY: test test-unit test-cov lint fmt typecheck migrate migration fresh seed db-init install help
 
 # ── Testing ──────────────────────────────────────────────────
 test:  ## Run all tests

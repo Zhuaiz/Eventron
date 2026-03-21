@@ -8,6 +8,7 @@ from app.deps import get_attendee_service, get_event_service, get_seating_servic
 from app.schemas.seat import (
     AutoAssignRequest,
     BulkSeatUpdate,
+    CustomLayoutRequest,
     LayoutRequest,
     SeatResponse,
     SeatUpdate,
@@ -77,6 +78,25 @@ async def create_venue_layout(
         spacing=body.spacing,
         replace=True,
     )
+    return [SeatResponse.model_validate(s) for s in seats]
+
+
+@router.post(
+    "/{event_id}/seats/custom-layout",
+    response_model=list[SeatResponse],
+    status_code=201,
+)
+async def create_custom_layout(
+    event_id: uuid.UUID,
+    body: CustomLayoutRequest,
+    svc: SeatingService = Depends(get_seating_service),
+):
+    """Create layout with variable seats per row.
+
+    Example: 3 rows of 8 VIP seats, then 12 rows of 20 general seats.
+    """
+    row_specs = [spec.model_dump(exclude_none=True) for spec in body.row_specs]
+    seats = await svc.create_custom_layout(event_id, row_specs, replace=True)
     return [SeatResponse.model_validate(s) for s in seats]
 
 
@@ -188,7 +208,10 @@ async def suggest_venue_zones(
 
     attendees = await att_svc.list_attendees_for_event(event_id)
     att_dicts = [
-        {"priority": getattr(a, "priority", 0)}
+        {
+            "role": getattr(a, "role", "参会者") or "参会者",
+            "priority": getattr(a, "priority", 0),
+        }
         for a in attendees
     ]
 

@@ -32,6 +32,7 @@ class AgentState(TypedDict):
         task_plan: Planner's decomposed task plan (list of SubTask).
         event_draft: Structured event info extracted by planner (passed to organizer).
         scope: Optional forced plugin scope (badge/checkin/seating/organizer).
+        reflection: Post-execution self-check result (set by reflect node).
     """
 
     messages: Annotated[list[BaseMessage], add_messages]
@@ -44,3 +45,5 @@ class AgentState(TypedDict):
     task_plan: list[SubTask]
     event_draft: dict[str, Any] | None
     scope: str | None
+    tool_calls: list[dict[str, Any]]
+    reflection: dict[str, Any] | None

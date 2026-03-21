@@ -16,7 +16,7 @@ class EventCreate(BaseModel):
     location: Optional[str] = Field(None, max_length=300)
     venue_rows: int = Field(0, ge=0, le=200)
     venue_cols: int = Field(0, ge=0, le=200)
-    layout_type: str = Field("theater", pattern=r"^(theater|classroom|roundtable|banquet|u_shape)$")
+    layout_type: str = Field("theater", pattern=r"^(grid|theater|classroom|roundtable|banquet|u_shape)$")
     config: dict = Field(default_factory=dict)
 
 
@@ -30,7 +30,7 @@ class EventUpdate(BaseModel):
     venue_rows: Optional[int] = Field(None, ge=0, le=200)
     venue_cols: Optional[int] = Field(None, ge=0, le=200)
     layout_type: Optional[str] = Field(
-        None, pattern=r"^(theater|classroom|roundtable|banquet|u_shape)$"
+        None, pattern=r"^(grid|theater|classroom|roundtable|banquet|u_shape)$"
     )
     status: Optional[str] = Field(None, pattern=r"^(draft|active|completed|cancelled)$")
     config: Optional[dict] = None

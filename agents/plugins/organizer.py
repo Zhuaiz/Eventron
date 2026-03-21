@@ -19,6 +19,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from agents.llm_utils import extract_text_content
 from agents.plugins.base import AgentPlugin
 from agents.state import AgentState
 
@@ -180,7 +181,9 @@ class OrganizerPlugin(AgentPlugin):
         llm_messages = [{"role": "system", "content": system}]
         for msg in state["messages"][-20:]:
             if isinstance(msg, HumanMessage):
-                llm_messages.append({"role": "user", "content": msg.content})
+                llm_messages.append(
+                    {"role": "user", "content": extract_text_content(msg.content)}
+                )
             elif isinstance(msg, AIMessage):
                 llm_messages.append(
                     {"role": "assistant", "content": msg.content}

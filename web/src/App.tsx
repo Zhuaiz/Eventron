@@ -7,6 +7,7 @@ import { RegisterPage } from './pages/RegisterPage';
 import { EventListPage } from './pages/EventListPage';
 import { EventDetailPage } from './pages/EventDetailPage';
 import { BadgeTemplatesPage } from './pages/BadgeTemplatesPage';
+import { AssistantPage } from './pages/AssistantPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,6 +42,16 @@ function App() {
                 <ProtectedRoute>
                   <Layout>
                     <EventDetailPage />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/assistant"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <AssistantPage />
                   </Layout>
                 </ProtectedRoute>
               }

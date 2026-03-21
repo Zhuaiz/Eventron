@@ -43,7 +43,10 @@ class Settings(BaseSettings):
 
     # Anthropic (strong tier)
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-4-5-20250514"
+    anthropic_model: str = "claude-sonnet-4-6"
+
+    # Anthropic Max (max tier — highest capability, e.g. page generation)
+    anthropic_max_model: str = "claude-opus-4-6"
 
     # ── WeChat Work ──────────────────────────────────────────────
     wecom_corp_id: str = ""

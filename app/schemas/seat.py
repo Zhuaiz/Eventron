@@ -78,6 +78,25 @@ class LayoutRequest(BaseModel):
     spacing: float = Field(60.0, ge=30, le=120, description="Seat spacing in canvas units")
 
 
+class CustomRowSpec(BaseModel):
+    """One row-group specification for custom layouts."""
+
+    count: int = Field(..., ge=1, le=200, description="Seats in this row")
+    repeat: int = Field(1, ge=1, le=50, description="How many identical rows")
+    spacing: float | None = Field(None, ge=30, le=120, description="Seat spacing override")
+    zone: str | None = Field(None, max_length=50, description="Zone label")
+    label_prefix: str | None = Field(None, max_length=5, description="Row label prefix")
+
+
+class CustomLayoutRequest(BaseModel):
+    """Request body for creating a layout with variable seats per row."""
+
+    row_specs: list[CustomRowSpec] = Field(
+        ..., min_length=1, max_length=50,
+        description="Rows from front to back",
+    )
+
+
 class AutoAssignRequest(BaseModel):
     """Request body for auto-assigning seats."""
 

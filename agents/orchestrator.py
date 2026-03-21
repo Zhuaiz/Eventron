@@ -11,6 +11,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from agents.llm_utils import extract_text_content
 from agents.registry import PluginRegistry
 from agents.state import AgentState
 
@@ -52,11 +53,11 @@ async def classify_intent(
         plugin_descriptions=plugin_descriptions,
     )
 
-    # Get the last user message
+    # Get the last user message (handle multimodal content)
     last_msg = ""
     for msg in reversed(state["messages"]):
         if isinstance(msg, HumanMessage):
-            last_msg = msg.content
+            last_msg = extract_text_content(msg.content)
             break
 
     # Add context hints for better routing
@@ -128,7 +129,7 @@ async def chat_fallback_node(
     msgs = [{"role": "system", "content": system}]
     for msg in state["messages"][-10:]:
         if isinstance(msg, HumanMessage):
-            msgs.append({"role": "user", "content": msg.content})
+            msgs.append({"role": "user", "content": extract_text_content(msg.content)})
         elif isinstance(msg, AIMessage):
             msgs.append({"role": "assistant", "content": msg.content})
 

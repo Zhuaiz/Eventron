@@ -1,13 +1,14 @@
 /**
- * CheckinDesignTab — Check-in page design with sub-agent.
+ * CheckinDesignTab — Check-in page design + preview + QR code.
  *
- * Left: checkin page preview + settings
- * Right: sub-agent for designing the check-in experience
+ * Left: phone preview (iframe), stats, QR code, link
+ * Right: sub-agent for AI-driven design
  */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  QrCode, Smartphone, Clock, Users, CheckCircle, Settings2
+  QrCode, Smartphone, Users, CheckCircle,
+  ExternalLink, Copy, RefreshCw,
 } from 'lucide-react';
 import { apiClient } from '../../lib/api';
 import { SubAgentPanel } from '../SubAgentPanel';
@@ -22,115 +23,146 @@ interface DashboardStats {
   checkin_rate: number;
 }
 
+const API_BASE = import.meta.env.VITE_API_BASE || '';
+
 export function CheckinDesignTab({ eventId }: CheckinDesignTabProps) {
-  const [checkinMode, setCheckinMode] = useState('qr');
+  const [copied, setCopied] = useState(false);
+  const [previewKey, setPreviewKey] = useState(0);
+
+  const checkinUrl = `${window.location.origin}/p/${eventId}/checkin`;
+  const iframeSrc = `/p/${eventId}/checkin`;
 
   const { data: stats } = useQuery({
     queryKey: ['dashboard', eventId],
     queryFn: () => apiClient.getDashboard(eventId) as Promise<DashboardStats>,
+    refetchInterval: 10000,
   });
 
+  const copyLink = () => {
+    navigator.clipboard.writeText(checkinUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   return (
-    <div className="flex h-[calc(100vh-240px)] -mx-4 -mb-4">
-      {/* Left: Checkin setup */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+    <div className="flex h-full">
+      {/* ═══ Left: Preview + Controls ═══ */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-0">
         {/* Live Stats */}
         {stats && (
           <div className="grid grid-cols-3 gap-3">
-            <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <Users size={20} className="mx-auto text-indigo-500 mb-1" />
-              <p className="text-2xl font-bold text-gray-900">{stats.total_attendees}</p>
-              <p className="text-xs text-gray-500">总人数</p>
+            <div className="bg-white rounded-lg border border-gray-200 p-3 text-center">
+              <Users size={18} className="mx-auto text-indigo-500 mb-1" />
+              <p className="text-xl font-bold text-gray-900">{stats.total_attendees}</p>
+              <p className="text-[10px] text-gray-500">总人数</p>
             </div>
-            <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <CheckCircle size={20} className="mx-auto text-green-500 mb-1" />
-              <p className="text-2xl font-bold text-green-600">{stats.checked_in_count}</p>
-              <p className="text-xs text-gray-500">已签到</p>
+            <div className="bg-white rounded-lg border border-gray-200 p-3 text-center">
+              <CheckCircle size={18} className="mx-auto text-green-500 mb-1" />
+              <p className="text-xl font-bold text-green-600">{stats.checked_in_count}</p>
+              <p className="text-[10px] text-gray-500">已签到</p>
             </div>
-            <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <Clock size={20} className="mx-auto text-blue-500 mb-1" />
-              <p className="text-2xl font-bold text-blue-600">{(stats.checkin_rate * 100).toFixed(0)}%</p>
-              <p className="text-xs text-gray-500">签到率</p>
+            <div className="bg-white rounded-lg border border-gray-200 p-3 text-center">
+              <div className="w-[18px] h-[18px] mx-auto mb-1 rounded-full bg-blue-100 flex items-center justify-center text-[10px] font-bold text-blue-600">%</div>
+              <p className="text-xl font-bold text-blue-600">
+                {stats.checkin_rate != null
+                  ? `${(stats.checkin_rate * 100).toFixed(0)}%`
+                  : '0%'}
+              </p>
+              <p className="text-[10px] text-gray-500">签到率</p>
             </div>
           </div>
         )}
 
-        {/* Checkin Mode Selector */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <h3 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <Settings2 size={18} className="text-indigo-600" />
-            签到方式
+        {/* Check-in link + actions */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <QrCode size={16} className="text-indigo-600" />
+            签到链接
           </h3>
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={() => setCheckinMode('qr')}
-              className={`p-4 rounded-lg border-2 text-center transition-all ${
-                checkinMode === 'qr'
-                  ? 'border-indigo-500 bg-indigo-50'
-                  : 'border-gray-200 hover:border-gray-300'
-              }`}
+          <div className="flex items-center gap-2">
+            <div className="flex-1 px-3 py-2 bg-gray-50 border rounded-lg text-xs text-gray-600 font-mono truncate">
+              {checkinUrl}
+            </div>
+            <button onClick={copyLink}
+              className="shrink-0 flex items-center gap-1 px-3 py-2 border rounded-lg text-xs text-gray-600 hover:bg-gray-50"
             >
-              <QrCode size={28} className={`mx-auto mb-2 ${checkinMode === 'qr' ? 'text-indigo-600' : 'text-gray-400'}`} />
-              <p className="text-sm font-medium">扫码签到</p>
-              <p className="text-[10px] text-gray-500 mt-1">参会者扫二维码自助签到</p>
+              <Copy size={12} />
+              {copied ? '已复制' : '复制'}
             </button>
-            <button
-              onClick={() => setCheckinMode('name')}
-              className={`p-4 rounded-lg border-2 text-center transition-all ${
-                checkinMode === 'name'
-                  ? 'border-indigo-500 bg-indigo-50'
-                  : 'border-gray-200 hover:border-gray-300'
-              }`}
+            <a href={iframeSrc} target="_blank" rel="noopener noreferrer"
+              className="shrink-0 flex items-center gap-1 px-3 py-2 border rounded-lg text-xs text-indigo-600 hover:bg-indigo-50"
             >
-              <Users size={28} className={`mx-auto mb-2 ${checkinMode === 'name' ? 'text-indigo-600' : 'text-gray-400'}`} />
-              <p className="text-sm font-medium">姓名签到</p>
-              <p className="text-[10px] text-gray-500 mt-1">工作人员搜索姓名签到</p>
-            </button>
+              <ExternalLink size={12} />
+              打开
+            </a>
           </div>
+          <p className="text-[10px] text-gray-400">
+            参会者扫码打开此链接 → 输入姓名 → 完成签到。可将此链接生成二维码打印。
+          </p>
         </div>
 
-        {/* H5 Page Preview */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <h3 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <Smartphone size={18} className="text-indigo-600" />
-            签到页预览
-          </h3>
-          <div className="mx-auto w-48 h-80 bg-gray-100 rounded-2xl border-4 border-gray-800 overflow-hidden relative">
-            <div className="absolute top-0 left-0 right-0 h-6 bg-gray-800 flex items-center justify-center">
-              <div className="w-16 h-1.5 bg-gray-600 rounded-full" />
-            </div>
-            <div className="pt-8 px-3 text-center">
-              <div className="w-16 h-16 bg-indigo-100 rounded-full mx-auto mb-2 flex items-center justify-center">
-                <QrCode size={24} className="text-indigo-500" />
+        {/* Phone preview */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <Smartphone size={16} className="text-indigo-600" />
+              签到页预览
+            </h3>
+            <button onClick={() => setPreviewKey((k) => k + 1)}
+              className="flex items-center gap-1 text-xs text-gray-500 hover:text-indigo-600"
+            >
+              <RefreshCw size={12} />
+              刷新
+            </button>
+          </div>
+
+          {/* Phone frame with iframe */}
+          <div className="mx-auto" style={{ width: '260px' }}>
+            <div className="bg-gray-900 rounded-[28px] p-[6px] shadow-xl">
+              {/* Notch */}
+              <div className="bg-gray-900 mx-auto w-20 h-5 rounded-b-xl flex items-center justify-center relative z-10">
+                <div className="w-12 h-1.5 bg-gray-700 rounded-full" />
               </div>
-              <p className="text-[10px] font-semibold text-gray-800 mb-1">活动签到</p>
-              <p className="text-[8px] text-gray-500 mb-3">请扫描二维码完成签到</p>
-              <div className="w-20 h-20 bg-white border border-gray-300 rounded mx-auto mb-2 flex items-center justify-center">
-                <QrCode size={40} className="text-gray-300" />
+              {/* Screen */}
+              <div className="bg-white rounded-[22px] overflow-hidden" style={{ height: '460px', marginTop: '-8px' }}>
+                <iframe
+                  key={previewKey}
+                  src={iframeSrc}
+                  className="w-full h-full border-0"
+                  title="签到页预览"
+                  style={{ transform: 'scale(1)', transformOrigin: 'top left' }}
+                />
               </div>
-              <p className="text-[8px] text-gray-400">等待签到...</p>
+              {/* Home indicator */}
+              <div className="flex justify-center py-2">
+                <div className="w-20 h-1 bg-gray-600 rounded-full" />
+              </div>
             </div>
           </div>
-          <p className="text-xs text-gray-500 text-center mt-3">
-            告诉 AI 助手你想要的签到页风格，生成 H5 页面
+
+          <p className="text-[10px] text-gray-400 text-center mt-3">
+            这是参会者手机上看到的签到页面。让 AI 助手帮你自定义风格。
           </p>
         </div>
       </div>
 
-      {/* Right: Sub-agent */}
+      {/* ═══ Right: AI Assistant ═══ */}
       <SubAgentPanel
         eventId={eventId}
-        scope="checkin"
-        title="签到设计助手"
-        placeholder="描述签到流程需求..."
-        welcomeMessage={
-          '我是签到系统设计助手。我可以帮你：\n\n' +
-          '· 设计 H5 签到页面\n' +
-          '· 设置签到方式（扫码/姓名/人脸）\n' +
-          '· 生成签到二维码\n' +
-          '· 自定义签到确认页面\n\n' +
-          '你想设计什么样的签到体验？'
-        }
+        scope="pagegen"
+        title="签到页设计助手"
+        placeholder="如：生成签到页、设计深蓝风格签到页、生成签到二维码..."
+        welcomeMessage={`我可以帮你：
+1. 生成签到页 — 参会者扫码即可在手机上签到
+2. 自定义设计 — 上传参考图片，我来设计签到页风格
+3. 生成二维码 — 生成签到入口二维码供打印
+4. 查看签到统计 — 实时签到人数和签到率
+
+签到链接已就绪：${checkinUrl}
+参会者打开后输入姓名即可签到。
+
+需要我帮你做什么？`}
       />
     </div>
   );

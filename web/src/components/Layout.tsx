@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Menu, X, LogOut } from 'lucide-react';
 import { useAuth } from '../lib/auth';
-import { AgentChat } from './AgentChat';
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -11,6 +10,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
 
   const navItems = [
+    { label: 'AI 助手', href: '/assistant', icon: '✨' },
     { label: '活动管理', href: '/', icon: '📅' },
     { label: '模板管理', href: '/templates', icon: '🎨' },
   ];
@@ -91,8 +91,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-auto">
-          <div className="p-4 lg:p-8">{children}</div>
+        <main className="flex-1 overflow-hidden flex flex-col">
+          <div className="flex-1 p-4 lg:p-8 flex flex-col min-h-0 overflow-hidden">{children}</div>
         </main>
       </div>
 
@@ -104,8 +104,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
         />
       )}
 
-      {/* AI Agent Chat */}
-      <AgentChat />
     </div>
   );
 }

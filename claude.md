@@ -69,17 +69,59 @@ Plugins receive a `services` dict at construction: `{event, seating, attendee, l
 Base class provides `self.event_svc`, `self.seat_svc`, `self.attendee_svc`, `self.get_llm(tier)`.
 `PluginRegistry` — register/get/active_plugins/build_routing_prompt(). Orchestrator NEVER hard-codes plugin names.
 
-**AgentState:** messages, current_plugin, user_profile, event_id, pending_approval, turn_output, attachments, task_plan
-**Graph:** orchestrator → conditional edge → plugin → orchestrator → END (when turn_output set)
+**AgentState:** messages, current_plugin, user_profile, event_id, pending_approval, turn_output, attachments, task_plan, reflection
+**Graph:** orchestrator → conditional edge → plugin → reflect → END (when turn_output set)
 **Plan-and-Execute:** attachments present → planner → task decomposition → user confirms → plugins execute
 **HITL:** Only `change` plugin uses `interrupt()`. PostgresSaver in prod, MemorySaver in tests.
 
-**LLM Tiers:** fast(deepseek)=orchestrator/identity/checkin/badge/guide, smart(gpt-4o-mini)=organizer/seating/change/planner-planning, strong(claude-sonnet)=planner-vision/pagegen
+**LLM Tiers:** fast(deepseek)=orchestrator/identity/checkin/badge/guide, smart(gpt-4o)=organizer/seating/change/planner-planning, strong(claude-sonnet)=planner-vision/pagegen-ReAct, max(claude-opus)=pagegen-internal-generation(deploy_custom_checkin_page内部LLM调用，16K tokens)
 
-**9 Plugins:** identity, planner(multimodal+task decomposition), organizer(event CRUD+capacity calc), seating, checkin, change(HITL), badge, pagegen, guide
+**9 Plugins (all LLM-first):** identity(LLM name extraction+heuristic fallback), planner(multimodal+task decomposition, Excel via read_excel_sheets_as_text→LLM), organizer(event CRUD+capacity calc), **seating(ReAct tool-calling agent: 14 LangChain tools via bind_tools+react_loop)**, checkin, change(LLM classifies change type+extracts details, HITL), badge(LLM sub-intent routing), **pagegen(ReAct agent: 11 tools, "vibe coding" — deploy_custom takes short description, internal max-tier LLM generates complete HTML page with CSS inline)**, guide
 **agent_chat.py** now uses real LangGraph: `build_graph()` → `graph.ainvoke()` with service-injected plugins.
 **Multimodal input:** agent_chat accepts multipart form data (images/Excel/PDF), planner uses vision LLM to extract event info.
-**File processing tools:** `tools/file_extract.py` — build_vision_message, extract_from_excel, extract_from_pdf, detect_file_type.
+**File processing tools:** `tools/file_extract.py` — build_vision_message, extract_from_excel, extract_from_pdf, detect_file_type. `tools/excel_io.py` — read_excel_sheets_as_text (raw text for LLM). `tools/event_files.py` — pure filesystem helpers (load_manifest, find_files_by_type, find_latest_file_by_type) for reading event file store.
+**File persistence:** agent_chat uploads are persisted to `event_files` API (`uploads/events/{event_id}/`), not temp dir.
+**Event file access:** Base `AgentPlugin.get_event_files(event_id, file_type)` lets any plugin look up previously uploaded files. Seating and planner plugins auto-detect when user references files without current attachment and fall back to event file store.
+**Multimodal messages:** `_build_multimodal_message()` embeds images as base64 data URIs in `HumanMessage(content=[...])`. `extract_text_content()` in `agents/llm_utils.py` safely extracts text from both string and multimodal content formats — used by all plugins and orchestrator.
+**Duplicate file handling:** Both `agent_chat.py` and `event_files.py` replace old manifest entries when uploading a file with the same original filename (old disk file also deleted).
+
+### Agent Self-Evolution System
+
+Three-layer closed-loop self-optimization, all under `agents/`:
+
+**Layer 1 — Reflection (`reflection.py`):** Post-execution self-check. Domain-specific validators for seating (utilization rate, unseated attendees, zone coverage) and badge (tool call verification, PDF link check). Generic validator checks reply quality and error rate. `deep_reflect()` uses LLM for complex quality assessment. Runs as `reflect` node in graph after every plugin.
+
+**Layer 2 — Event Memory (`memory.py`):** Per-event interaction logs stored as JSON under `data/agent_memory/{event_id}/`. Each `InteractionRecord` captures: plugin, user_msg, agent_reply, tool_calls, reflection_score, user_feedback(+1/-1). `get_relevant_experiences()` retrieves past successful interactions for context injection. `find_similar_event_experiences()` searches across events by layout_type/attendee_count similarity.
+
+**Layer 3 — Prompt Evolution (`prompt_evolution.py`):** Versioned system prompts per plugin under `data/prompt_versions/{plugin}/`. `PromptVersion` tracks: uses, avg_score, feedback counts, A/B ratio. `PluginPromptManager.get_active_prompt()` routes traffic between baseline and candidates. `evaluate_candidates()` auto-promotes winners (score > baseline + 0.1) and drops losers. `generate_improved_prompt()` uses LLM to create new variants from failure analysis.
+
+**Graph integration:** `plugin → reflect → END`. Reflect node: validate result → record to memory → update prompt scores. Experience injection: before each plugin, `_experiences` injected from memory.
+**Frontend:** 👍👎 buttons on AI messages (via `FeedbackButtons` in ChatMessage), reflection quality bar. `POST /agent/chat/feedback` records to memory. `GET /agent/chat/stats/{event_id}` returns aggregated stats.
+
+### Agent Design Principle — Tool-Calling ReAct Agents
+
+**Core rule:** Agents use LangChain `bind_tools()` + ReAct loop. LLM decides WHEN and WHICH tools to call. No hardcoded keyword routing.
+
+**Architecture (seating plugin as reference):**
+1. `agents/tools/seating_tools.py` — `make_seating_tools(event_id, seat_svc, event_svc, attendee_svc)` factory. 10 `@tool` functions wrapping service calls via closure.
+2. `agents/react.py` — `react_loop(llm, messages, tools, max_iter=10)`. Generic ReAct loop: LLM thinks → calls tools → observes results → iterates → final text response.
+3. `agents/plugins/seating.py` — `SeatingPlugin.handle()` builds tools → `llm.bind_tools(tools)` → `react_loop()`.
+
+**Pattern for every tool-calling plugin:**
+1. Create `agents/tools/{name}_tools.py` with `make_{name}_tools()` factory
+2. Each tool is a thin async wrapper around a service method, decorated with `@tool`
+3. Plugin `handle()`: build tools → bind to LLM → run `react_loop()` → return result
+4. System prompt tells LLM its capabilities and workflow rules (e.g. "verify after each operation")
+
+**Why ReAct over hardcoded routing:**
+- LLM handles messy inputs (merged cells, mixed languages, vague user intent) that regex/heuristics cannot
+- LLM chains multiple tools autonomously (read Excel → import attendees → create layout → set zones → verify)
+- Self-verification: LLM calls `view_seats` after layout creation to confirm results
+- Tools stay pure (structured input → structured output), all intelligence lives in the LLM layer
+
+**Seating tools (14):** get_event_info, view_seats, create_layout, create_custom_layout, auto_assign, set_zone, set_zone_unzoned, read_event_excel, list_attendees, import_attendees, list_attendees_with_seats, swap_two_attendees, reassign_attendee_seat, unassign_attendee
+
+**Other plugins (LLM-first JSON, not yet tool-calling):** identity, change, badge, pagegen use `extract_json()` from `agents/llm_utils.py` for robust LLM JSON parsing (3-layer: direct → code block → embedded).
 
 ## Organizer Portal (Phase A — Done)
 
@@ -128,11 +170,16 @@ EventronError → NotFoundError(Event/Attendee/Seat/Template) | SeatNotAvailable
   - API v1: auth, dashboard, import, badge-templates, events CRUD+duplicate, attendees full CRUD+checkin
 
 - **Phase 8** — H5 pages + badges:
-  - tools: badge_render(Jinja2+WeasyPrint, business/tent_card templates), page_render(H5 checkin page)
-  - API: /export/badges PDF endpoint, scope-routed agent chat
+  - tools: badge_render(Jinja2+WeasyPrint, business/tent_card/conference templates), page_render(H5 checkin page)
+  - API: /export/badges/html (browser print), /export/badges/preview (event-scoped), /badge-templates/preview (standalone, no eventId)
   - AgentState.scope for forced plugin routing from SubAgentPanel
-  - BadgeTab: template gallery + PDF generate buttons
-  - Badge plugin: sub-intent routing (generate/list/design)
+  - BadgeTab: template gallery with iframe previews + HTML generate/print buttons (3 built-in types: conference/business/tent_card)
+  - Badge plugin: ReAct tool-calling agent with `design_template` (full HTML+CSS), `generate_badges` (HTML output)
+  - **Conference template** (NEW): 90×130mm vertical, deep blue gradient, SVG cityscape, white name band, glow effects (`templates/badges/conference.html/css`)
+  - **BadgeTemplatesPage**: iframe-based visual previews (built-in + custom), preview modal, standalone preview endpoint
+  - **SubAgentPanel file picker**: popover showing existing event files + upload-new option (replaces direct file dialog)
+  - **Image MIME detection**: magic-bytes based detection in `agent_chat.py` and `file_extract.py` (fixes WeChat .jpg→PNG mismatch)
+  - **LLM config**: `max_tokens` 2000→4096, model `claude-sonnet-4-6`
 
 - **Phase 9** — Priority-based roles + venue zones + seat map editor:
   - **Role refactor:** Replaced fixed role enum (vip/speaker/organizer/staff/attendee) with free-text `role` + `priority` (int 0-100). Labels customizable (甲方嘉宾, 演讲嘉宾, 工作人员, etc.).
@@ -153,8 +200,19 @@ EventronError → NotFoundError(Event/Attendee/Seat/Template) | SeatNotAvailable
   - **Layout creation API:** `POST /seats/layout` with `LayoutRequest` schema (layout_type, rows, cols, table_size, spacing). Replaces old grid-only creation.
   - **Migration:** `d4f8a1b2c396` — adds pos_x, pos_y, rotation; back-fills from row_num/col_num.
 
+- **Phase 11** — Public check-in system (scan QR → mobile H5 → search name → check in):
+  - **Public API** (`app/api/public_checkin.py`): NO-JWT routes under `/p/{event_id}/checkin`. Endpoints: `GET /checkin` (serve H5 page), `POST /checkin/search` (name search), `POST /checkin/confirm/{aid}` (confirm), `GET /checkin/stats` (live stats).
+  - **H5 template** (`templates/pages/checkin.html/css/js`): Mobile-first interactive page. Deep blue gradient, name search → disambiguation → check-in confirm → success + seat info. Self-contained JS calls public API via fetch. Stats poll every 15s.
+  - **Agent tools** (`agents/tools/checkin_tools.py`): 11 LangChain tools via `make_checkin_tools(event_id, checkin_svc, event_svc, attendee_svc, llm)`. `deploy_custom_checkin_page(design_description)` takes a SHORT text description and internally calls the LLM to generate HTML+CSS (avoids LLM cramming thousands of chars into tool args). Other tools: `get_event_info`, `get_checkin_stats`, `get_checkin_url`, `generate_checkin_qr`, `render_checkin_page`, `list_attendee_roles`, `preview_checkin_page`, `get_current_page_source`, `patch_page_css`, `update_page_source`.
+  - **Pagegen plugin ("vibe coding")**: ReAct agent where tools provide data and lightweight actions. Heavy page generation happens INSIDE `deploy_custom_checkin_page` via an internal LLM call. 3-level edit: `patch_page_css` (CSS-only) → `get_current_page_source` + `update_page_source` (read-modify-write) → `deploy_custom_checkin_page(description)` (full AI redesign).
+  - **react_loop upgrade**: Consecutive failure detection — same tool failing 2+ times triggers abort + user-facing error message. Progress callback via PROGRESS_QUEUE contextvars for SSE streaming.
+  - **Service wiring**: CheckinService injected into agent_chat services dict (`"checkin"` key). Both chat endpoints updated.
+  - **CheckinDesignTab**: Phone frame iframe preview of live check-in page, copy link button, external open, stats with auto-refresh, SubAgentPanel scope="pagegen".
+  - **Vite proxy**: Added `/p` proxy to backend for dev mode.
+  - **page_render.py**: Added `event_id` param + `_load_js()` for inline JS injection.
+
 ### Next 🔜
-- **Phase B (Portal)** — 物料计算与物料管理(按活动规模自动估算+手动调整), 铭牌设计(模板管理收进badge agent+活动内BadgeTab，外层菜单降级admin-only), 签到页设计(H5+AI), 子Agent面板, 签到实时看板(WebSocket), 审批中心
+- **Phase B (Portal)** — 物料计算与物料管理(按活动规模自动估算+手动调整), 铭牌设计(模板管理收进badge agent+活动内BadgeTab，外层菜单降级admin-only), 签到实时看板(WebSocket), 审批中心
 - **Phase C (Portal)** — 团队协作(多Organizer), 自动审批规则引擎
 
 ## Quickstart

@@ -13,6 +13,14 @@ from jinja2 import Environment, FileSystemLoader
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates" / "badges"
 
+# Font stack that works across Linux (Docker), macOS, and Windows.
+# "Droid Sans Fallback" is the most universally available CJK font on Linux.
+CJK_FONT_STACK = (
+    '"Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", '
+    '"Droid Sans Fallback", "PingFang SC", "Microsoft YaHei", '
+    '"Helvetica Neue", sans-serif'
+)
+
 # Priority tier display labels (Chinese)
 # Higher priority = more important.  Role labels are now free-text,
 # so we fall back to the attendee's own role string.
@@ -25,6 +33,7 @@ PRIORITY_TIER_LABELS: dict[str, str] = {
 # Built-in template name → (html file, css file)
 BUILTIN_TEMPLATES: dict[str, tuple[str, str]] = {
     "business": ("business.html", "business.css"),
+    "conference": ("conference.html", "conference.css"),
     "tent_card": ("tent_card.html", "tent_card.css"),
 }
 
@@ -37,10 +46,36 @@ def _load_builtin_css(css_filename: str) -> str:
     return ""
 
 
+def _role_color(role: str) -> tuple[str, str]:
+    """Generate a deterministic background + text color for a role label.
+
+    Returns (bg_color, text_color) as CSS hex strings.
+    """
+    palette = [
+        ("#e2b93b", "#1a1a2e"),  # gold
+        ("#e94560", "#ffffff"),  # red
+        ("#0f9b58", "#ffffff"),  # green
+        ("#4a90d9", "#ffffff"),  # blue
+        ("#9b59b6", "#ffffff"),  # purple
+        ("#00b894", "#ffffff"),  # teal
+        ("#fd79a8", "#ffffff"),  # pink
+        ("#636e72", "#ffffff"),  # gray
+        ("#0984e3", "#ffffff"),  # bright blue
+        ("#d63031", "#ffffff"),  # bright red
+    ]
+    # Simple hash to pick consistent color per role
+    h = sum(ord(c) for c in role) if role else 0
+    bg, text = palette[h % len(palette)]
+    # "参会者" gets a muted default
+    if role in ("参会者", ""):
+        return ("rgba(255,255,255,0.15)", "#ffffff")
+    return bg, text
+
+
 def _prepare_attendees(
     attendees: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Enrich attendee dicts with role_label and qr_data placeholder."""
+    """Enrich attendee dicts with role_label, role_color, role_text, qr_data."""
     result = []
     for att in attendees:
         enriched = dict(att)
@@ -56,6 +91,9 @@ def _prepare_attendees(
             else:
                 role = PRIORITY_TIER_LABELS["normal"]
         enriched["role_label"] = role
+        bg, text = _role_color(role)
+        enriched["role_color"] = bg
+        enriched["role_text"] = text
         # qr_data can be a base64 data-uri set by the caller
         if "qr_data" not in enriched:
             enriched["qr_data"] = ""
@@ -91,6 +129,9 @@ def render_badges_html(
         env = Environment(autoescape=False)
         tpl = env.from_string(custom_html)
         css = custom_css or ""
+        # Ensure CJK fonts are available even in custom templates
+        if "Droid Sans" not in css and "Noto Sans" not in css:
+            css = f"body {{ font-family: {CJK_FONT_STACK}; }}\n{css}"
     else:
         # Use built-in file template
         if template_name not in BUILTIN_TEMPLATES:

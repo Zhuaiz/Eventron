@@ -23,6 +23,11 @@ from app.api.auth import get_current_organizer
 from app.deps import get_event_service
 from app.services.event_service import EventService
 from app.services.exceptions import EventNotFoundError
+from tools.event_files import (
+    event_dir as _event_dir,
+    load_manifest as _load_manifest,
+    save_manifest as _save_manifest,
+)
 from tools.file_extract import detect_file_type
 
 router = APIRouter()
@@ -44,31 +49,6 @@ INLINE_CONTENT_TYPES = {
     "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp",
     "application/pdf",
 }
-
-
-def _event_dir(event_id: uuid.UUID) -> Path:
-    d = UPLOAD_ROOT / str(event_id)
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def _manifest_path(event_id: uuid.UUID) -> Path:
-    return _event_dir(event_id) / ".manifest.json"
-
-
-def _load_manifest(event_id: uuid.UUID) -> list[dict[str, Any]]:
-    mp = _manifest_path(event_id)
-    if mp.exists():
-        return json.loads(mp.read_text())
-    return []
-
-
-def _save_manifest(
-    event_id: uuid.UUID, files: list[dict[str, Any]]
-) -> None:
-    _manifest_path(event_id).write_text(
-        json.dumps(files, ensure_ascii=False, indent=2)
-    )
 
 
 @router.post("/events/{event_id}/files")
@@ -106,8 +86,17 @@ async def upload_event_file(
     dest = _event_dir(event_id) / safe_name
     dest.write_bytes(content)
 
-    # Update manifest
+    # Update manifest — replace duplicate original filenames
     manifest = _load_manifest(event_id)
+
+    # Remove old entries with the same original filename
+    old_entries = [e for e in manifest if e.get("filename") == file.filename]
+    for old in old_entries:
+        old_path = _event_dir(event_id) / old["stored_name"]
+        if old_path.exists():
+            old_path.unlink()
+    manifest = [e for e in manifest if e.get("filename") != file.filename]
+
     file_type = detect_file_type(file.filename)
     entry = {
         "id": file_id,

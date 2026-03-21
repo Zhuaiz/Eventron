@@ -45,8 +45,8 @@ interface Attendee {
 
 interface ZoneSuggestion {
   zone: string;
-  min_priority: number;
   rows: number[];
+  count: number;
   color: string;
   description: string;
 }
@@ -64,12 +64,10 @@ const LAYOUT_OPTIONS: { value: string; label: string; desc: string }[] = [
   { value: 'u_shape', label: 'U 形', desc: '三面围合，适合会议' },
 ];
 
-const ZONE_PALETTE = [
-  { name: '贵宾区', color: '#e2b93b' },
-  { name: '嘉宾区', color: '#4a90d9' },
-  { name: '媒体区', color: '#9b59b6' },
-  { name: '工作人员区', color: '#27ae60' },
-  { name: '普通区', color: '#6b7280' },
+/** Rotating color palette for auto-generated zone colors */
+const ZONE_COLORS = [
+  '#e2b93b', '#4a90d9', '#9b59b6', '#27ae60', '#6b7280',
+  '#e94560', '#00b894', '#fd79a8', '#636e72', '#0984e3',
 ];
 
 const SEAT_RADIUS = 18;
@@ -89,19 +87,21 @@ function getSeatFill(
 ): string {
   if (seat.seat_type === 'disabled') return '#d1d5db';
   if (seat.seat_type === 'aisle') return 'transparent';
+  // Zone color is primary — occupied seats use higher opacity, empty seats lighter
+  if (seat.zone) {
+    const zc = zoneColorMap.get(seat.zone);
+    if (zc) {
+      if (seat.seat_type === 'reserved') return `${zc}55`;
+      return seat.attendee_id ? `${zc}66` : `${zc}33`;
+    }
+  }
+  // No zone: fall back to assignment-based colors
   if (seat.attendee_id && att) {
     if (att.priority >= 10) return '#c4b5fd';
     if (att.priority >= 5) return '#fde68a';
     return '#bbf7d0';
   }
-  if (seat.seat_type === 'reserved') {
-    const zc = seat.zone ? zoneColorMap.get(seat.zone) : undefined;
-    return zc ? `${zc}55` : '#fef3c7';
-  }
-  if (seat.zone) {
-    const zc = zoneColorMap.get(seat.zone);
-    return zc ? `${zc}33` : '#dbeafe';
-  }
+  if (seat.seat_type === 'reserved') return '#fef3c7';
   return '#dbeafe';
 }
 
@@ -112,14 +112,16 @@ function getSeatStroke(
 ): string {
   if (seat.seat_type === 'disabled') return '#9ca3af';
   if (seat.seat_type === 'aisle') return 'transparent';
+  // Zone color is primary for stroke too
+  if (seat.zone) {
+    const zc = zoneColorMap.get(seat.zone);
+    if (zc) return zc;
+  }
+  // No zone: fall back to priority-based stroke
   if (seat.attendee_id && att) {
     if (att.priority >= 10) return '#7c3aed';
     if (att.priority >= 5) return '#d97706';
     return '#22c55e';
-  }
-  if (seat.zone) {
-    const zc = zoneColorMap.get(seat.zone);
-    return zc || '#93c5fd';
   }
   return '#93c5fd';
 }
@@ -133,9 +135,11 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
   const [selectedSeat, setSelectedSeat] = useState<Seat | null>(null);
   const [strategy, setStrategy] = useState('priority_first');
   const [paintMode, setPaintMode] = useState(false);
-  const [paintZone, setPaintZone] = useState<string>('贵宾区');
+  const [paintZone, setPaintZone] = useState<string>('');
   const [showZonePanel, setShowZonePanel] = useState(false);
   const [layoutType, setLayoutType] = useState(event.layout_type || 'grid');
+  const [rows, setRows] = useState(event.venue_rows || 5);
+  const [cols, setCols] = useState(event.venue_cols || 8);
   const [tableSize, setTableSize] = useState(8);
   // Assign picker
   const [showAssignPicker, setShowAssignPicker] = useState(false);
@@ -166,8 +170,6 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
     x: number; y: number; w: number; h: number;
   } | null>(null);
   const selStart = useRef<{ x: number; y: number } | null>(null);
-  // Track selected seat IDs from drag-select (non-paint mode)
-  const [dragSelectedIds, setDragSelectedIds] = useState<Set<string>>(new Set());
 
   // Tool mode: 'select' | 'pan'
   const [toolMode, setToolMode] = useState<'select' | 'pan'>('select');
@@ -193,17 +195,29 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
   });
 
   // ── mutations ──
+  // Ref to centerView so mutation callback can call latest version
+  const centerViewRef = useRef<() => void>(() => {});
+
   const createLayoutMutation = useMutation({
     mutationFn: () =>
       apiClient.createSeatLayout(eventId, {
         layout_type: layoutType,
-        rows: event.venue_rows,
-        cols: event.venue_cols,
+        rows,
+        cols,
         table_size: tableSize,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['seats', eventId] });
+    onSuccess: async () => {
+      // Sync rows/cols back to event model
+      await apiClient.updateEvent(eventId, {
+        venue_rows: rows,
+        venue_cols: cols,
+        layout_type: layoutType,
+      });
+      await queryClient.invalidateQueries({ queryKey: ['seats', eventId] });
+      queryClient.invalidateQueries({ queryKey: ['event', eventId] });
       queryClient.invalidateQueries({ queryKey: ['dashboard', eventId] });
+      // Reset to 100% zoom, centered on content
+      setTimeout(() => centerViewRef.current(), 100);
     },
   });
 
@@ -269,18 +283,44 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
     return map;
   }, [attendees]);
 
+  // Dynamic zone palette: derive from attendee roles (+ "普通区" fallback)
+  const zonePalette = useMemo(() => {
+    const roleSet = new Set<string>();
+    (attendees as Attendee[]).forEach((a) => {
+      if (a.role && a.role !== '参会者') roleSet.add(a.role);
+    });
+    const roles = Array.from(roleSet);
+    // Build zone entries: "{role}区" with rotating colors
+    const zones = roles.map((r, i) => ({
+      name: r.endsWith('区') ? r : `${r}区`,
+      color: ZONE_COLORS[i % ZONE_COLORS.length],
+    }));
+    // Always include "普通区" at the end
+    if (!zones.some((z) => z.name === '普通区')) {
+      zones.push({ name: '普通区', color: '#6b7280' });
+    }
+    return zones;
+  }, [attendees]);
+
+  // Sync paintZone to first palette entry when palette changes
+  useEffect(() => {
+    if (zonePalette.length > 0 && !zonePalette.some((z) => z.name === paintZone)) {
+      setPaintZone(zonePalette[0].name);
+    }
+  }, [zonePalette, paintZone]);
+
   const zoneColorMap = useMemo(() => {
     const map = new Map<string, string>();
-    const uniqueZones = new Set<string>();
+    // First, map from palette
+    zonePalette.forEach((z) => map.set(z.name, z.color));
+    // Also map any existing seat zones not in the palette
     (seats as Seat[]).forEach((s) => {
-      if (s.zone) uniqueZones.add(s.zone);
-    });
-    Array.from(uniqueZones).forEach((z, i) => {
-      const preset = ZONE_PALETTE.find((p) => p.name === z);
-      map.set(z, preset?.color || ZONE_PALETTE[i % ZONE_PALETTE.length].color);
+      if (s.zone && !map.has(s.zone)) {
+        map.set(s.zone, ZONE_COLORS[map.size % ZONE_COLORS.length]);
+      }
     });
     return map;
-  }, [seats]);
+  }, [seats, zonePalette]);
 
   const activeZones = useMemo(() => {
     const zones = new Map<string, number>();
@@ -421,14 +461,13 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
         };
         return;
       }
-      // Select / paint mode → start drag selection
-      if (paintModeRef.current || toolModeRef.current === 'select') {
+      // Paint mode only → start drag selection for bulk zone painting
+      if (paintModeRef.current) {
         const pt = svgPoint(e.clientX, e.clientY);
         selStart.current = pt;
         const initRect = { x: pt.x, y: pt.y, w: 0, h: 0 };
         selRectRef.current = initRect;
         setSelRect(initRect);
-        setDragSelectedIds(new Set());
       }
     },
     [svgPoint],
@@ -458,11 +497,6 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
         };
         selRectRef.current = newRect;
         setSelRect(newRect);
-        // Live preview: highlight seats inside rect
-        if (newRect.w > 2 || newRect.h > 2) {
-          const found = findSeatsInRect(newRect);
-          setDragSelectedIds(new Set(found.map((s) => s.id)));
-        }
       }
     };
 
@@ -477,18 +511,11 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
         const finalRect = selRectRef.current;
         if (finalRect && (finalRect.w > 3 || finalRect.h > 3)) {
           const selected = findSeatsInRect(finalRect);
-          if (selected.length > 0) {
-            if (paintModeRef.current) {
-              // Paint mode: apply zone to selected seats
-              bulkMutateRef.current({
-                seat_ids: selected.map((s) => s.id),
-                zone: paintZoneRef.current || null,
-              });
-              setDragSelectedIds(new Set());
-            } else {
-              // Select mode: keep highlighted so user can pick a zone
-              setDragSelectedIds(new Set(selected.map((s) => s.id)));
-            }
+          if (selected.length > 0 && paintModeRef.current) {
+            bulkMutateRef.current({
+              seat_ids: selected.map((s) => s.id),
+              zone: paintZoneRef.current || null,
+            });
           }
         }
         // Clean up
@@ -563,8 +590,6 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
       });
       return;
     }
-    // Clear drag selection on single click
-    setDragSelectedIds(new Set());
     if (selectedSeat?.id === seat.id) {
       setSelectedSeat(null);
       setShowAssignPicker(false);
@@ -625,7 +650,6 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
             const fill = getSeatFill(seat, att, zoneColorMap);
             const stroke = getSeatStroke(seat, att, zoneColorMap);
             const isSelected = selectedSeat?.id === seat.id;
-            const isDragSelected = dragSelectedIds.has(seat.id);
             const rotation = seat.rotation || 0;
             const displayLabel = seat.attendee_id
               ? (att?.name?.slice(0, 2) || '✓')
@@ -640,19 +664,15 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
               >
                 <circle
                   r={SEAT_RADIUS}
-                  fill={isDragSelected ? '#e0e7ff' : fill}
-                  stroke={
-                    isSelected ? '#4f46e5'
-                    : isDragSelected ? '#6366f1'
-                    : stroke
-                  }
-                  strokeWidth={isSelected ? 3 : isDragSelected ? 2.5 : 1.5}
+                  fill={fill}
+                  stroke={isSelected ? '#4f46e5' : stroke}
+                  strokeWidth={isSelected ? 3 : 1.5}
                 />
-                {(isSelected || isDragSelected) && (
+                {isSelected && (
                   <circle
                     r={SEAT_RADIUS + 4}
                     fill="none"
-                    stroke={isSelected ? '#4f46e5' : '#818cf8'}
+                    stroke="#4f46e5"
                     strokeWidth={1.5}
                     strokeDasharray="4,3"
                   />
@@ -716,6 +736,25 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
     setPan({ x: fitPanX, y: fitPanY });
   }, [bounds, setZoom, setPan]);
 
+  // Center view at 100% zoom (used after layout generation)
+  const centerView = useCallback(() => {
+    if (!svgRef.current) return;
+    const svg = svgRef.current;
+    const rect = svg.getBoundingClientRect();
+    const svgW = rect.width;
+    const svgH = rect.height;
+    const contentW = bounds.maxX - bounds.minX + 80;
+    const contentH = bounds.maxY - bounds.minY + 80;
+    if (contentW <= 0 || contentH <= 0) return;
+    // 100% zoom, centered on content
+    const panX = (svgW - contentW) / 2 - bounds.minX + 40;
+    const panY = (svgH - contentH) / 2 - bounds.minY + 40;
+    setZoom(1);
+    setPan({ x: panX, y: panY });
+  }, [bounds, setZoom, setPan]);
+
+  useEffect(() => { centerViewRef.current = centerView; }, [centerView]);
+
   // ── Selected seat detail panel with assign/unassign + zone picker ──
   const renderSeatDetail = () => {
     if (!selectedSeat) return null;
@@ -747,7 +786,7 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
         <div className="mb-3">
           <div className="text-xs text-gray-500 mb-1.5">分区：</div>
           <div className="flex flex-wrap items-center gap-1.5">
-            {ZONE_PALETTE.map((z) => (
+            {zonePalette.map((z) => (
               <button
                 key={z.name}
                 onClick={() => {
@@ -879,7 +918,7 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
     size: 'sm' | 'md' = 'md',
   ) => (
     <div className="flex flex-wrap items-center gap-1.5">
-      {ZONE_PALETTE.map((z) => (
+      {zonePalette.map((z) => (
         <button
           key={z.name}
           onClick={() => onSelect(z.name)}
@@ -916,9 +955,9 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
   );
 
   return (
-    <div className="flex gap-4 h-[calc(100vh-180px)]">
+    <div className="flex gap-4 h-full overflow-hidden">
       {/* ═══ Left: Canvas + Controls ═══ */}
-      <div className="flex-1 flex flex-col min-w-0 gap-3">
+      <div className="flex-1 flex flex-col min-w-0 gap-3 overflow-hidden">
 
         {/* Toolbar row 1: Layout + view controls */}
         <div className="bg-white rounded-lg shadow px-4 py-3">
@@ -935,6 +974,29 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
                 </option>
               ))}
             </select>
+
+            {/* Rows × Cols */}
+            <div className="flex items-center gap-1 text-sm">
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={rows}
+                onChange={(e) => setRows(Number(e.target.value))}
+                className="w-14 px-1.5 py-1.5 border border-gray-300 rounded text-center text-sm"
+              />
+              <span className="text-gray-400 text-xs">行</span>
+              <span className="text-gray-300">×</span>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={cols}
+                onChange={(e) => setCols(Number(e.target.value))}
+                className="w-14 px-1.5 py-1.5 border border-gray-300 rounded text-center text-sm"
+              />
+              <span className="text-gray-400 text-xs">列</span>
+            </div>
 
             {(layoutType === 'roundtable' || layoutType === 'banquet') && (
               <div className="flex items-center gap-1 text-sm">
@@ -954,8 +1016,8 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
               onClick={() => createLayoutMutation.mutate()}
               disabled={
                 createLayoutMutation.isPending ||
-                event.venue_rows === 0 ||
-                event.venue_cols === 0
+                rows <= 0 ||
+                cols <= 0
               }
               className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 disabled:opacity-50"
             >
@@ -1085,13 +1147,20 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
               <ZoomOut size={15} />
             </button>
             <button
-              onClick={fitAll}
+              onClick={() => {
+                const isNear100 = Math.abs(zoom - 1) < 0.05;
+                if (isNear100) {
+                  fitAll();
+                } else {
+                  centerView();
+                }
+              }}
               className="p-1.5 rounded text-gray-400 hover:bg-gray-100"
-              title="全览 — 适配所有座位到视图"
+              title={Math.abs(zoom - 1) < 0.05 ? '全览 — 缩放到全部可见' : '重置 — 回到100%居中'}
             >
               <Maximize size={15} />
             </button>
-            <span className="text-[11px] text-gray-400">
+            <span className="text-[11px] text-gray-400 select-none">
               {Math.round(zoom * 100)}%
             </span>
 
@@ -1126,37 +1195,11 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
             <div className="flex flex-col items-center justify-center h-full">
               <Grid3X3 size={48} className="text-gray-300 mb-4" />
               <p className="text-gray-500 text-sm">
-                {event.venue_rows > 0 && event.venue_cols > 0
-                  ? '选择布局类型，点击"生成座位"'
-                  : '请先在设置中配置会场行列数'}
+                选择布局类型、设置行列数，点击「生成座位」
               </p>
             </div>
           ) : (
-            <>
-              {renderSVGCanvas()}
-
-              {/* Floating drag-select action bar — absolute, no layout shift */}
-              {dragSelectedIds.size > 0 && !paintMode && (
-                <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 bg-white/95 backdrop-blur border border-indigo-200 rounded-lg shadow-lg px-3 py-2 flex items-center gap-2">
-                  <span className="text-xs font-semibold text-indigo-900 whitespace-nowrap">
-                    {dragSelectedIds.size} 个座位
-                  </span>
-                  {renderZoneButtons((zone) => {
-                    bulkUpdateMutation.mutate({
-                      seat_ids: Array.from(dragSelectedIds),
-                      zone,
-                    });
-                    setDragSelectedIds(new Set());
-                  }, 'sm')}
-                  <button
-                    onClick={() => setDragSelectedIds(new Set())}
-                    className="p-0.5 text-gray-400 hover:text-gray-600"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              )}
-            </>
+            renderSVGCanvas()
           )}
         </div>
 
@@ -1177,19 +1220,17 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
       </div>
 
       {/* ═══ Right: Agent Sidebar (always visible) ═══ */}
-      <div className="w-80 flex-shrink-0 flex flex-col min-h-0">
-        <SubAgentPanel
-          eventId={eventId}
-          scope="seating"
-          title="排座 AI 助手"
-          placeholder="如：生成剧院弧形布局、前3排设为贵宾区..."
-          welcomeMessage={`我可以帮你：
+      <SubAgentPanel
+        eventId={eventId}
+        scope="seating"
+        title="排座 AI 助手"
+        placeholder="如：生成剧院弧形布局、前3排设为贵宾区..."
+        welcomeMessage={`我可以帮你：
 1. 生成布局 — 如「用圆桌布局 8人一桌」
 2. 自动排座 — 如「按优先级排座」
 3. 分区规划 — 如「前3排设为贵宾区」
 4. 查看状态 — 如「目前排座情况」`}
-        />
-      </div>
+      />
     </div>
   );
 }

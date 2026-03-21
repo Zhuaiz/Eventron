@@ -33,6 +33,11 @@ LLM_TIERS: dict[str, dict[str, str]] = {
         "model": settings.anthropic_model,
         "api_key": settings.anthropic_api_key,
     },
+    "max": {
+        "provider": "anthropic",
+        "model": settings.anthropic_max_model,
+        "api_key": settings.anthropic_api_key,
+    },
 }
 
 # ── Per-plugin recommended tier ──────────────────────────────
@@ -48,7 +53,7 @@ PLUGIN_LLM_MAP: dict[str, str] = {
 }
 
 # Fallback order: try these tiers in sequence if the preferred one has no key
-_FALLBACK_ORDER = ["fast", "smart", "strong"]
+_FALLBACK_ORDER = ["fast", "smart", "strong", "max"]
 
 
 def _has_valid_key(tier: dict[str, str]) -> bool:
@@ -100,6 +105,8 @@ def get_llm(plugin_name: str | None = None) -> BaseChatModel:
             "model": tier["model"],
             "api_key": tier["api_key"],
             "temperature": 0,
+            "max_tokens": 4096,
+            "timeout": 120,
         }
         if tier.get("base_url"):
             kwargs["base_url"] = tier["base_url"]
@@ -108,10 +115,15 @@ def get_llm(plugin_name: str | None = None) -> BaseChatModel:
     elif provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
+        # Max tier gets larger token budget for full-page generation
+        is_max = tier["model"] == settings.anthropic_max_model
+        tokens = 16384 if is_max else 8192
         return ChatAnthropic(
             model=tier["model"],
             api_key=tier["api_key"],
             temperature=0,
+            max_tokens=tokens,
+            timeout=120.0,
         )
 
     else:

@@ -203,6 +203,21 @@ export class ApiClient {
     return this.request('POST', `/events/${eventId}/seats/layout`, body);
   }
 
+  async createCustomLayout(
+    eventId: string,
+    rowSpecs: Array<{
+      count: number;
+      repeat?: number;
+      spacing?: number;
+      zone?: string;
+      label_prefix?: string;
+    }>,
+  ) {
+    return this.request('POST', `/events/${eventId}/seats/custom-layout`, {
+      row_specs: rowSpecs,
+    });
+  }
+
   async autoAssignSeats(eventId: string, strategy: string = 'random') {
     return this.request('POST', `/events/${eventId}/seats/auto-assign`, { strategy });
   }
@@ -241,10 +256,33 @@ export class ApiClient {
     return `${API_BASE}/v1/events/${eventId}/export/seatmap`;
   }
 
-  getExportBadgesUrl(eventId: string, templateName = 'business', templateId?: string) {
+  getExportBadgesUrl(
+    eventId: string,
+    templateName = 'business',
+    templateId?: string,
+    roles?: string[],
+  ) {
     const params = new URLSearchParams({ template_name: templateName });
     if (templateId) params.set('template_id', templateId);
-    return `${API_BASE}/v1/events/${eventId}/export/badges?${params}`;
+    if (roles && roles.length > 0) params.set('roles', roles.join(','));
+    return `${API_BASE}/v1/events/${eventId}/export/badges/html?${params}`;
+  }
+
+  getBadgePreviewUrl(
+    eventId: string,
+    templateName = 'business',
+    templateId?: string,
+  ) {
+    const params = new URLSearchParams({ template_name: templateName });
+    if (templateId) params.set('template_id', templateId);
+    return `${API_BASE}/v1/events/${eventId}/export/badges/preview?${params}`;
+  }
+
+  /** Standalone template preview (no eventId needed) — for global template management page */
+  getTemplatePreviewUrl(templateName = 'conference', templateId?: string) {
+    const params = new URLSearchParams({ template_name: templateName });
+    if (templateId) params.set('template_id', templateId);
+    return `${API_BASE}/v1/badge-templates/preview?${params}`;
   }
 
   // ── Event Files ──────────────────────────────────────────────
@@ -299,6 +337,12 @@ export class ApiClient {
     event_id: string | null;
     action_taken: string | null;
     task_plan: any[] | null;
+    tool_calls: {
+      tool_name: string;
+      tool_name_zh: string;
+      status: string;
+      summary: string;
+    }[] | null;
   }> {
     const formData = new FormData();
     formData.append('message', message);
@@ -326,9 +370,89 @@ export class ApiClient {
     return response.json();
   }
 
+  /**
+   * Stream agent chat via SSE — yields progress events in real-time.
+   * Falls back to regular /chat if streaming fails.
+   */
+  async *streamAgentChat(
+    message: string,
+    opts?: {
+      eventId?: string;
+      sessionId?: string;
+      scope?: string;
+      files?: File[];
+    }
+  ): AsyncGenerator<{
+    event: string;
+    [key: string]: any;
+  }> {
+    const formData = new FormData();
+    formData.append('message', message);
+    if (opts?.eventId) formData.append('event_id', opts.eventId);
+    if (opts?.sessionId) formData.append('session_id', opts.sessionId);
+    if (opts?.scope) formData.append('scope', opts.scope);
+    if (opts?.files) opts.files.forEach((f) => formData.append('files', f));
+
+    const token = this.getToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(`${API_BASE}/v1/agent/chat/stream`, {
+      method: 'POST', headers, body: formData,
+    });
+
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      window.location.href = '/login';
+      throw new Error('Unauthorized');
+    }
+    if (!response.ok) {
+      throw new Error('Stream error');
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No stream body');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            yield data;
+          } catch {
+            // skip malformed lines
+          }
+        }
+      }
+    }
+  }
+
   // Legacy text-only chat (backward compat)
   async sendChatMessage(message: string, eventId?: string, sessionId?: string) {
     return this.sendAgentChat(message, { eventId, sessionId });
+  }
+
+  // Agent feedback (self-evolution)
+  async sendAgentFeedback(eventId: string, feedback: number) {
+    return this.request('POST', '/v1/agent/chat/feedback', {
+      event_id: eventId,
+      feedback,
+    });
+  }
+
+  // Agent stats (self-evolution)
+  async getAgentStats(eventId: string) {
+    return this.request('GET', `/v1/agent/chat/stats/${eventId}`);
   }
 
   // Badge Templates

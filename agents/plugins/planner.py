@@ -19,6 +19,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from agents.llm_utils import extract_text_content
 from agents.plugins.base import AgentPlugin
 from agents.state import AgentState
 
@@ -123,12 +124,17 @@ class PlannerPlugin(AgentPlugin):
 
     async def handle(self, state: AgentState) -> dict[str, Any]:
         """Analyze inputs and create task plan."""
-        attachments = state.get("attachments") or []
+        attachments = list(state.get("attachments") or [])
         last_msg = ""
         for msg in reversed(state["messages"]):
             if isinstance(msg, HumanMessage):
-                last_msg = msg.content
+                last_msg = extract_text_content(msg.content)
                 break
+
+        # If no current attachments but user references files,
+        # look up previously uploaded event files.
+        if not attachments and state.get("event_id"):
+            attachments = self._find_event_files(state["event_id"])
 
         # If there are image attachments, use vision analysis
         if any(a.get("type") == "image" for a in attachments):
@@ -144,6 +150,22 @@ class PlannerPlugin(AgentPlugin):
 
         # Text-only planning
         return await self._handle_text_only(state, last_msg)
+
+    @staticmethod
+    def _find_event_files(event_id: str) -> list[dict]:
+        """Look up all files from the event's file store."""
+        try:
+            from tools.event_files import load_manifest, event_dir
+            manifest = load_manifest(event_id)
+            results = []
+            edir = event_dir(event_id)
+            for entry in manifest:
+                p = edir / entry["stored_name"]
+                if p.exists():
+                    results.append({**entry, "path": str(p)})
+            return results
+        except Exception:
+            return []
 
     async def _handle_with_vision(
         self,
@@ -207,24 +229,28 @@ class PlannerPlugin(AgentPlugin):
         attachments: list[dict],
         user_msg: str,
     ) -> dict[str, Any]:
-        """Analyze Excel attendee list and plan."""
-        from tools.file_extract import extract_from_excel
+        """Use LLM to analyze Excel content and plan.
+
+        LLM-first: read raw text → LLM extracts meaning → structured plan.
+        """
+        from tools.excel_io import read_excel_sheets_as_text
 
         excel_att = next(
             a for a in attachments if a.get("type") == "excel"
         )
         try:
-            data = extract_from_excel(excel_att["path"])
+            excel_text = read_excel_sheets_as_text(
+                file_path=excel_att["path"]
+            )
+            # Let the LLM analyze the raw Excel content directly
             analysis = (
-                f"Excel分析结果：{data['summary']}\n"
-                f"表头：{', '.join(data['headers'][:10])}\n"
-                f"共 {data['row_count']} 条记录"
+                f"Excel 文件原始内容：\n{excel_text}"
             )
             return await self._create_plan_from_analysis(
                 state, analysis, user_msg, attachments
             )
         except Exception as e:
-            reply = f"Excel 解析出错：{e}"
+            reply = f"Excel 读取出错：{e}"
             return {
                 "messages": [AIMessage(content=reply)],
                 "turn_output": reply,

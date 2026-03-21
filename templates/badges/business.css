@@ -1,79 +1,150 @@
-/* Business badge — 90mm × 54mm (standard badge size) */
+/* Business conference badge — 90mm × 54mm
+   Deep blue gradient + white name band + golden accent bar
+   Inspired by professional conference badge designs */
 @page {
   size: 90mm 54mm;
   margin: 0;
 }
+* { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  margin: 0;
-  padding: 0;
-  font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+  margin: 0; padding: 0;
+  font-family: "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC",
+    "Droid Sans Fallback", "PingFang SC", "Microsoft YaHei",
+    "Helvetica Neue", sans-serif;
 }
+
+/* ── Badge container ── */
 .badge {
   width: 90mm;
   height: 54mm;
   page-break-after: always;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  padding: 4mm 5mm;
-  box-sizing: border-box;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-  color: #fff;
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(160deg, #0a1628 0%, #122244 35%, #0d3b66 70%, #1a4a7a 100%);
+  color: #ffffff;
 }
+
+/* ── Top decorative stripe ── */
+.badge-deco-top {
+  height: 1.2mm;
+  flex-shrink: 0;
+  background: linear-gradient(90deg,
+    rgba(226,185,59,0.8) 0%, rgba(226,185,59,0.3) 30%,
+    transparent 50%,
+    rgba(79,172,254,0.3) 70%, rgba(79,172,254,0.6) 100%);
+}
+
+/* ── Diagonal decorative glow via pseudo-element ── */
+.badge::before {
+  content: '';
+  position: absolute;
+  top: -20mm;
+  right: -15mm;
+  width: 50mm;
+  height: 50mm;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(79,172,254,0.12) 0%, transparent 70%);
+  pointer-events: none;
+}
+.badge::after {
+  content: '';
+  position: absolute;
+  bottom: 5mm;
+  left: -10mm;
+  width: 40mm;
+  height: 40mm;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(226,185,59,0.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+/* ── Header: event name + date ── */
 .badge-header {
   text-align: center;
+  padding: 3mm 5mm 2mm;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
 }
 .event-name {
-  font-size: 9pt;
-  font-weight: 600;
-  letter-spacing: 0.5pt;
-  opacity: 0.9;
+  font-size: 8pt;
+  font-weight: 700;
+  letter-spacing: 1pt;
+  color: rgba(255,255,255,0.95);
+  text-shadow: 0 0.5mm 2mm rgba(0,0,0,0.3);
 }
 .event-date {
-  font-size: 6.5pt;
-  opacity: 0.6;
-  margin-top: 1mm;
+  font-size: 5.5pt;
+  color: rgba(255,255,255,0.55);
+  margin-top: 0.5mm;
+  letter-spacing: 0.3pt;
 }
-.badge-body {
+
+/* ── White name band: center focal point ── */
+.name-band {
+  background: rgba(255, 255, 255, 0.93);
+  padding: 2.5mm 5mm;
   text-align: center;
   flex: 1;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 0 4mm rgba(0,0,0,0.15);
 }
 .attendee-name {
-  font-size: 16pt;
-  font-weight: 700;
-  letter-spacing: 1pt;
+  font-size: 18pt;
+  font-weight: 800;
+  color: #1a1a2e;
+  letter-spacing: 2pt;
 }
 .attendee-title {
-  font-size: 8pt;
-  margin-top: 1.5mm;
-  opacity: 0.8;
+  font-size: 7pt;
+  color: #555555;
+  margin-top: 1.2mm;
+  letter-spacing: 0.2pt;
 }
 .attendee-org {
-  font-size: 7.5pt;
-  margin-top: 1mm;
-  opacity: 0.7;
+  font-size: 6.5pt;
+  color: #888888;
+  margin-top: 0.5mm;
 }
+
+/* ── Footer: role tag + optional QR ── */
 .badge-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 2mm 4mm 2.5mm;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
 }
 .role-tag {
-  font-size: 6.5pt;
-  padding: 1mm 2.5mm;
-  border-radius: 2mm;
-  font-weight: 600;
+  display: inline-block;
+  font-size: 6pt;
+  padding: 0.8mm 3mm;
+  border-radius: 1.5mm;
+  font-weight: 700;
+  letter-spacing: 0.5pt;
   text-transform: uppercase;
 }
-.role-vip { background: #e2b93b; color: #1a1a2e; }
-.role-speaker { background: #e94560; color: #fff; }
-.role-organizer { background: #0f9b58; color: #fff; }
-.role-staff { background: #4a90d9; color: #fff; }
-.role-attendee { background: rgba(255,255,255,0.15); color: #fff; }
 .qr {
-  width: 12mm;
-  height: 12mm;
+  width: 10mm;
+  height: 10mm;
+  border-radius: 0.5mm;
+}
+
+/* ── Bottom accent bar (golden gradient) ── */
+.accent-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1.5mm;
+  background: linear-gradient(90deg, #e2b93b 0%, #f4d03f 40%, #e2b93b 60%, #c9a227 100%);
+  z-index: 2;
 }

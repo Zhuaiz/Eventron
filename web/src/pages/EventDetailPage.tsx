@@ -76,9 +76,9 @@ export function EventDetailPage() {
   ];
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Header */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 flex-shrink-0">
         <button onClick={() => navigate('/')}
           className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
           <ArrowLeft size={22} className="text-gray-600" />
@@ -102,7 +102,7 @@ export function EventDetailPage() {
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-gray-200">
+      <div className="border-b border-gray-200 flex-shrink-0">
         <div className="flex gap-1 overflow-x-auto">
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -125,16 +125,17 @@ export function EventDetailPage() {
         </div>
       </div>
 
-      {/* Tab Content */}
-      <div>
-        {activeTab === 'overview' && <OverviewTab eventId={id!} />}
-        {activeTab === 'attendees' && <AttendeesTab eventId={id!} />}
-        {activeTab === 'seating' && <SeatingTab eventId={id!} event={event as any} />}
-        {activeTab === 'badge' && <BadgeTab eventId={id!} />}
-        {activeTab === 'checkin' && <CheckinDesignTab eventId={id!} />}
-        {activeTab === 'files' && <FilesTab eventId={id!} />}
-        {activeTab === 'import' && <ImportTab eventId={id!} />}
-        {activeTab === 'settings' && <SettingsTab eventId={id!} event={event as any} />}
+      {/* Tab Content — all tabs stay mounted, hidden via CSS to preserve state */}
+      {/* Uses absolute positioning so height is guaranteed regardless of flex resolution */}
+      <div className="flex-1 min-h-0 relative">
+        <div className={activeTab === 'overview' ? 'absolute inset-0 overflow-auto' : 'hidden'}><OverviewTab eventId={id!} /></div>
+        <div className={activeTab === 'attendees' ? 'absolute inset-0 overflow-auto' : 'hidden'}><AttendeesTab eventId={id!} /></div>
+        <div className={activeTab === 'seating' ? 'absolute inset-0' : 'hidden'}><SeatingTab eventId={id!} event={event as any} /></div>
+        <div className={activeTab === 'badge' ? 'absolute inset-0 overflow-auto' : 'hidden'}><BadgeTab eventId={id!} /></div>
+        <div className={activeTab === 'checkin' ? 'absolute inset-0 overflow-auto' : 'hidden'}><CheckinDesignTab eventId={id!} /></div>
+        <div className={activeTab === 'files' ? 'absolute inset-0 overflow-auto' : 'hidden'}><FilesTab eventId={id!} /></div>
+        <div className={activeTab === 'import' ? 'absolute inset-0 overflow-auto' : 'hidden'}><ImportTab eventId={id!} /></div>
+        <div className={activeTab === 'settings' ? 'absolute inset-0 overflow-auto' : 'hidden'}><SettingsTab eventId={id!} event={event as any} /></div>
       </div>
     </div>
   );

@@ -15,7 +15,14 @@ from typing import Any
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_SPACING = 60.0  # virtual canvas units between seats
+DEFAULT_SPACING = 46.0  # virtual canvas units between seats (seat ⌀ ≈ 36)
+TARGET_CANVAS = 960.0   # target canvas width to fit typical viewport at ~100%
+MIN_SEAT_SPACING = 38.0  # min spacing (seat ⌀ ≈ 36, min gap ≈ 2)
+
+
+def _adaptive_spacing(cols: int, spacing: float, factor: float = 1.0) -> float:
+    """Shrink spacing for wide layouts to fit TARGET_CANVAS at ~100% zoom."""
+    return min(spacing, max(MIN_SEAT_SPACING, TARGET_CANVAS / max(cols * factor, 1)))
 
 
 # ===================================================================
@@ -53,18 +60,96 @@ def generate_layout(
     )
 
 
+def generate_custom_layout(
+    row_specs: list[dict[str, Any]],
+    *,
+    default_spacing: float = DEFAULT_SPACING,
+) -> list[dict[str, Any]]:
+    """Generate layout with variable seats per row — for real venue configs.
+
+    Each entry in *row_specs* describes one or more rows:
+        {
+          "count": 8,           # seats in this row (required)
+          "repeat": 3,          # how many identical rows (default 1)
+          "spacing": 60,        # seat-to-seat spacing override (optional)
+          "zone": "贵宾区",      # zone label for all seats in these rows
+          "label_prefix": "V",  # row label prefix override (optional)
+        }
+
+    Rows are centered horizontally (widest row sets the canvas width).
+    Returns list of seat spec dicts compatible with Seat model.
+    """
+    if not row_specs:
+        return []
+
+    # Expand repeats into a flat row list
+    expanded: list[dict[str, Any]] = []
+    for spec in row_specs:
+        repeat = max(1, spec.get("repeat", 1))
+        for _ in range(repeat):
+            expanded.append(spec)
+
+    # Find widest row to center everything
+    max_width = 0.0
+    for spec in expanded:
+        count = spec["count"]
+        sp = spec.get("spacing", default_spacing)
+        row_width = (count - 1) * sp if count > 1 else 0
+        max_width = max(max_width, row_width)
+
+    seats: list[dict[str, Any]] = []
+    y_cursor = 0.0
+    row_num = 1
+
+    for idx, spec in enumerate(expanded):
+        count = spec["count"]
+        sp = spec.get("spacing", default_spacing)
+        zone = spec.get("zone")
+        prefix = spec.get("label_prefix") or chr(65 + idx % 26)
+        row_width = (count - 1) * sp if count > 1 else 0
+
+        # Center this row relative to widest row
+        x_offset = (max_width - row_width) / 2
+
+        for c in range(count):
+            seat: dict[str, Any] = {
+                "row_num": row_num,
+                "col_num": c + 1,
+                "pos_x": round(x_offset + c * sp, 1),
+                "pos_y": round(y_cursor, 1),
+                "rotation": 0,
+                "label": f"{prefix}{c + 1}",
+                "seat_type": "normal",
+            }
+            if zone:
+                seat["zone"] = zone
+            seats.append(seat)
+
+        # Vertical gap: use this row's spacing for row height
+        y_cursor += sp
+        row_num += 1
+
+    return seats
+
+
 def _layout_grid(
     rows: int, cols: int, *, spacing: float = DEFAULT_SPACING, **_kw: Any,
 ) -> list[dict[str, Any]]:
-    """Simple rectangular grid (default)."""
+    """Simple rectangular grid (default).
+
+    Spacing adapts to keep total width ≤ TARGET_CANVAS px (≈ one viewport),
+    while never going below MIN_SEAT_SPACING to avoid overlap.
+    """
+    sp = _adaptive_spacing(cols, spacing)
+
     seats: list[dict[str, Any]] = []
     for r in range(rows):
         for c in range(cols):
             seats.append({
                 "row_num": r + 1,
                 "col_num": c + 1,
-                "pos_x": round(c * spacing, 1),
-                "pos_y": round(r * spacing, 1),
+                "pos_x": round(c * sp, 1),
+                "pos_y": round(r * sp, 1),
                 "rotation": 0,
                 "label": f"{chr(65 + r % 26)}{c + 1}",
                 "seat_type": "normal",
@@ -79,13 +164,15 @@ def _layout_theater(
 
     Front rows are slightly narrower and curve toward a focal point (stage).
     """
+    sp = _adaptive_spacing(cols, spacing)
+
     seats: list[dict[str, Any]] = []
     # Virtual stage at (center_x, -100)
-    center_x = (cols - 1) * spacing / 2
-    base_radius = cols * spacing * 0.8
+    center_x = (cols - 1) * sp / 2
+    base_radius = cols * sp * 0.8
 
     for r in range(rows):
-        radius = base_radius + r * spacing * 1.1
+        radius = base_radius + r * sp * 1.1
         # Arc angle range — wider for back rows
         arc_range = min(math.pi * 0.55, 0.4 + r * 0.02)
         n_seats = cols + (r // 3)  # back rows can be slightly wider
@@ -120,9 +207,11 @@ def _layout_classroom(
 
     Pairs share a desk.  Extra vertical spacing between rows.
     """
+    sp = _adaptive_spacing(cols, spacing, factor=1.15)  # account for desk gaps
+
     seats: list[dict[str, Any]] = []
-    desk_gap = spacing * 0.3  # gap between pairs
-    row_gap = spacing * 1.6  # extra vertical spacing (desk depth)
+    desk_gap = sp * 0.3  # gap between pairs
+    row_gap = sp * 1.6  # extra vertical spacing (desk depth)
 
     col_idx = 0
     for r in range(rows):
@@ -139,7 +228,7 @@ def _layout_classroom(
                 "label": f"{chr(65 + r % 26)}{col_idx}",
                 "seat_type": "normal",
             })
-            px_offset += spacing
+            px_offset += sp
             # Add desk gap after every 2 seats
             if col_idx % 2 == 0:
                 px_offset += desk_gap
@@ -165,8 +254,10 @@ def _layout_roundtable(
     # Arrange tables in a grid
     table_cols = max(1, math.ceil(math.sqrt(n_tables)))
     table_rows = max(1, math.ceil(n_tables / table_cols))
-    table_spacing = spacing * (table_size / 2 + 1.5)
-    table_radius = spacing * table_size / (2 * math.pi) + spacing * 0.3
+    # Compact radius: circumference fits seats, minimal padding
+    table_radius = spacing * table_size / (2 * math.pi) + spacing * 0.15
+    # Tight gap between table edges (≈ 0.8 seat-widths)
+    table_spacing = 2 * table_radius + spacing * 0.8
 
     seats: list[dict[str, Any]] = []
     seat_counter = 0
@@ -229,8 +320,8 @@ def _layout_banquet(
     table_rows = max(1, math.ceil(n_tables / table_cols))
     table_w = seats_per_side * spacing
     table_h = spacing * 2.5
-    table_spacing_x = table_w + spacing * 2
-    table_spacing_y = table_h + spacing * 3
+    table_spacing_x = table_w + spacing * 1.2
+    table_spacing_y = table_h + spacing * 2
 
     seats: list[dict[str, Any]] = []
     seat_counter = 0
@@ -296,9 +387,10 @@ def _layout_u_shape(
 
     Open side faces the stage/front.  `rows` = depth, `cols` = width.
     """
+    sp = _adaptive_spacing(cols, spacing)
     seats: list[dict[str, Any]] = []
-    width = (cols - 1) * spacing
-    depth = (rows - 1) * spacing
+    width = (cols - 1) * sp
+    depth = (rows - 1) * sp
     seat_counter = 0
     row_counter = 1
 
@@ -310,7 +402,7 @@ def _layout_u_shape(
             "row_num": row_counter,
             "col_num": 1,
             "pos_x": 0.0,
-            "pos_y": round(i * spacing, 1),
+            "pos_y": round(i * sp, 1),
             "rotation": 90,
             "label": f"L{i + 1}",
             "seat_type": "normal",
@@ -324,7 +416,7 @@ def _layout_u_shape(
         seats.append({
             "row_num": row_counter,
             "col_num": i + 2,
-            "pos_x": round((i + 1) * spacing, 1),
+            "pos_x": round((i + 1) * sp, 1),
             "pos_y": round(depth, 1),
             "rotation": 0,
             "label": f"B{i + 1}",
@@ -340,7 +432,7 @@ def _layout_u_shape(
             "row_num": row_counter,
             "col_num": cols,
             "pos_x": round(width, 1),
-            "pos_y": round(depth - i * spacing, 1),
+            "pos_y": round(depth - i * sp, 1),
             "rotation": -90,
             "label": f"R{i + 1}",
             "seat_type": "normal",
@@ -634,77 +726,104 @@ def generate_seat_labels(
     return labels
 
 
+"""Rotating color palette for auto-generated zone colors (matches frontend)."""
+_ZONE_COLORS = [
+    '#e2b93b', '#4a90d9', '#9b59b6', '#27ae60', '#6b7280',
+    '#e94560', '#00b894', '#fd79a8', '#636e72', '#0984e3',
+]
+
+
 def suggest_zones(
     rows: int,
     cols: int,
     attendees: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """AI-style zone suggestion based on attendee composition.
+    """Role-aware zone suggestion based on attendee composition.
 
-    Analyzes attendee priorities and suggests how to divide the venue
-    into zones. Pure heuristic — no LLM needed.
+    Groups attendees by role, allocates rows proportionally (higher-
+    priority roles get front rows), and names zones "{role}区".
 
     Args:
         rows: Total venue rows.
         cols: Total venue columns.
-        attendees: Dicts with 'priority'.
+        attendees: Dicts with 'role' (str) and 'priority' (int).
 
     Returns:
-        List of zone defs: {zone, min_priority, rows, color, description}.
+        List of zone defs: {zone, rows, color, description, count}.
     """
     if not attendees or rows == 0:
         return []
 
-    priorities = [a.get("priority", 0) for a in attendees]
-    max_pri = max(priorities)
+    # Group by role
+    role_groups: dict[str, list[dict[str, Any]]] = {}
+    for a in attendees:
+        role = a.get("role") or "参会者"
+        role_groups.setdefault(role, []).append(a)
 
-    if max_pri == 0:
-        # Everyone is equal — no zones needed
-        return [{"zone": "普通区", "min_priority": 0,
-                 "rows": list(range(1, rows + 1)),
-                 "color": "#6b7280", "description": "所有座位"}]
+    # Only one role (or everyone is "参会者") → single zone
+    if len(role_groups) <= 1:
+        role_name = next(iter(role_groups))
+        zone_name = role_name if role_name.endswith("区") else f"{role_name}区"
+        return [{"zone": zone_name, "rows": list(range(1, rows + 1)),
+                 "color": "#6b7280",
+                 "description": f"所有座位 · {len(attendees)} 人",
+                 "count": len(attendees)}]
 
-    # Count tiers
-    high = [p for p in priorities if p >= 10]
-    mid = [p for p in priorities if 1 <= p < 10]
+    # Sort roles by avg priority desc (high-priority roles get front rows)
+    def _avg_pri(group: list[dict[str, Any]]) -> float:
+        return sum(a.get("priority", 0) for a in group) / len(group)
+
+    sorted_roles = sorted(
+        role_groups.items(),
+        key=lambda kv: _avg_pri(kv[1]),
+        reverse=True,
+    )
+
+    # Split "参会者" (default role) out — always goes to the back
+    main_roles = [(r, g) for r, g in sorted_roles if r != "参会者"]
+    default_group = role_groups.get("参会者", [])
+
+    # Allocate rows proportionally by headcount
+    total_non_default = sum(len(g) for _, g in main_roles)
+    total_all = total_non_default + len(default_group)
+    # Reserve at least 1 row for default group if it exists
+    available_rows = rows - (1 if default_group else 0)
 
     zones = []
     row_cursor = 1
+    color_idx = 0
 
-    if high:
-        # Front rows for VIP-level
-        vip_rows = max(1, min(rows // 3, (len(high) + cols - 1) // cols))
+    for role_name, group in main_roles:
+        # Proportional rows: by headcount, at least 1, at most enough to fit
+        proportion = len(group) / total_all if total_all else 0
+        needed_rows = max(1, round(rows * proportion))
+        # Don't exceed what's left (reserve space for remaining roles)
+        remaining_roles = len(main_roles) - len(zones) - 1 + (1 if default_group else 0)
+        max_rows = available_rows - row_cursor + 1 - remaining_roles
+        alloc_rows = max(1, min(needed_rows, max_rows))
+
+        zone_name = role_name if role_name.endswith("区") else f"{role_name}区"
+        color = _ZONE_COLORS[color_idx % len(_ZONE_COLORS)]
+        color_idx += 1
+
         zones.append({
-            "zone": "贵宾区",
-            "min_priority": 10,
-            "rows": list(range(row_cursor, row_cursor + vip_rows)),
-            "color": "#e2b93b",
-            "description": f"前 {vip_rows} 排 · 高优先级嘉宾",
+            "zone": zone_name,
+            "rows": list(range(row_cursor, row_cursor + alloc_rows)),
+            "color": color,
+            "description": f"{alloc_rows} 排 · {role_name} {len(group)} 人",
+            "count": len(group),
         })
-        row_cursor += vip_rows
+        row_cursor += alloc_rows
 
-    if mid:
-        mid_rows = max(1, min(
-            (rows - row_cursor + 1) // 2,
-            (len(mid) + cols - 1) // cols,
-        ))
-        zones.append({
-            "zone": "嘉宾区",
-            "min_priority": 1,
-            "rows": list(range(row_cursor, row_cursor + mid_rows)),
-            "color": "#4a90d9",
-            "description": f"中间 {mid_rows} 排 · 重要嘉宾",
-        })
-        row_cursor += mid_rows
-
+    # Remaining rows → "参会者" / "普通区"
     remaining = rows - row_cursor + 1
     if remaining > 0:
         zones.append({
             "zone": "普通区",
-            "min_priority": 0,
             "rows": list(range(row_cursor, rows + 1)),
             "color": "#6b7280",
-            "description": f"后 {remaining} 排 · 普通参会者",
+            "description": f"{remaining} 排 · 参会者 {len(default_group)} 人",
+            "count": len(default_group),
         })
 
     return zones
