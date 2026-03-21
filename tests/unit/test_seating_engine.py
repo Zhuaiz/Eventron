@@ -29,12 +29,14 @@ class TestAssignSeatsRandom:
         result = assign_seats_random([], seats)
         assert result == []
 
-    def test_more_attendees_than_seats_raises(self):
-        """Should raise ValueError when overflow."""
+    def test_more_attendees_than_seats_partial_assign(self):
+        """Should assign as many as possible when more attendees than seats."""
         attendees = [make_attendee(id=f"a{i}") for i in range(10)]
         seats = make_seat_grid(1, 3)  # 3 seats
-        with pytest.raises(ValueError, match="Not enough seats"):
-            assign_seats_random(attendees, seats)
+        result = assign_seats_random(attendees, seats)
+        assert len(result) == 3  # only 3 seats available
+        seat_ids = [r["seat_id"] for r in result]
+        assert len(set(seat_ids)) == 3  # no duplicates
 
     def test_exact_fit(self):
         """Exactly as many attendees as seats."""
@@ -92,11 +94,12 @@ class TestAssignSeatsVipFirst:
         result = assign_seats_vip_first([], make_seat_grid(2, 2))
         assert result == []
 
-    def test_overflow_raises(self):
+    def test_overflow_partial_assign(self):
+        """Should assign as many as possible when overflow."""
         attendees = [make_attendee(id=f"a{i}") for i in range(5)]
         seats = make_seat_grid(1, 2)
-        with pytest.raises(ValueError):
-            assign_seats_vip_first(attendees, seats)
+        result = assign_seats_vip_first(attendees, seats)
+        assert len(result) == 2  # only 2 seats available
 
     def test_custom_vip_roles(self):
         """Custom vip_roles parameter is respected."""

@@ -130,12 +130,27 @@ def make_seating_tools(
         Args:
             strategy: 排座策略 random|priority_first|by_department|by_zone
         """
+        # Count unassigned attendees first for overflow reporting
+        attendees_list = await attendee_svc.list_attendees_for_event(eid)
+        all_seats = await seat_svc.get_seats(eid)
+        seated_ids = {str(s.attendee_id) for s in all_seats if s.attendee_id}
+        unassigned = [
+            a for a in attendees_list
+            if a.status in ("confirmed", "pending") and str(a.id) not in seated_ids
+        ]
+        available = [s for s in all_seats if not s.attendee_id and s.seat_type == "normal"]
+
         assignments = await seat_svc.auto_assign(
             eid, strategy=strategy,
         )
         if not assignments:
             return "没有需要分配的参会者（都已有座位，或没有参会者）"
-        return f"已分配 {len(assignments)} 位参会者, 策略: {strategy}"
+
+        overflow = len(unassigned) - len(assignments)
+        result = f"已分配 {len(assignments)} 位参会者, 策略: {strategy}"
+        if overflow > 0:
+            result += f"\n⚠️ 还有 {overflow} 人未分配座位（座位不足，共 {len(available)} 个空座位，{len(unassigned)} 人待分配）"
+        return result
 
     @tool
     async def set_zone(

@@ -459,22 +459,17 @@ def assign_seats_random(
     Returns:
         List of {attendee_id, seat_id} assignment dicts.
 
-    Raises:
-        ValueError: If more attendees than available seats.
     """
-    if len(attendees) > len(seats):
-        raise ValueError(
-            f"Not enough seats: {len(attendees)} attendees, {len(seats)} seats"
-        )
-    if not attendees:
+    if not attendees or not seats:
         return []
 
     shuffled_seats = seats.copy()
     random.shuffle(shuffled_seats)
 
+    limit = min(len(attendees), len(shuffled_seats))
     return [
-        {"attendee_id": att["id"], "seat_id": shuffled_seats[i]["id"]}
-        for i, att in enumerate(attendees)
+        {"attendee_id": attendees[i]["id"], "seat_id": shuffled_seats[i]["id"]}
+        for i in range(limit)
     ]
 
 
@@ -494,11 +489,7 @@ def assign_seats_priority_first(
     Returns:
         List of {attendee_id, seat_id} assignment dicts.
     """
-    if len(attendees) > len(seats):
-        raise ValueError(
-            f"Not enough seats: {len(attendees)} attendees, {len(seats)} seats"
-        )
-    if not attendees:
+    if not attendees or not seats:
         return []
 
     max_col = max(s["col_num"] for s in seats) if seats else 1
@@ -517,9 +508,11 @@ def assign_seats_priority_first(
         reverse=True,
     )
 
+    # Assign as many as we have seats for (overflow attendees get no seat)
+    limit = min(len(sorted_attendees), len(sorted_seats))
     return [
-        {"attendee_id": att["id"], "seat_id": sorted_seats[i]["id"]}
-        for i, att in enumerate(sorted_attendees)
+        {"attendee_id": sorted_attendees[i]["id"], "seat_id": sorted_seats[i]["id"]}
+        for i in range(limit)
     ]
 
 
@@ -558,11 +551,7 @@ def assign_seats_by_department(
     Returns:
         List of {attendee_id, seat_id} assignment dicts.
     """
-    if len(attendees) > len(seats):
-        raise ValueError(
-            f"Not enough seats: {len(attendees)} attendees, {len(seats)} seats"
-        )
-    if not attendees:
+    if not attendees or not seats:
         return []
 
     sorted_seats = sorted(seats, key=lambda s: (s["row_num"], s["col_num"]))
@@ -586,9 +575,10 @@ def assign_seats_by_department(
         members.sort(key=lambda a: a.get("priority", 0), reverse=True)
         ordered.extend(members)
 
+    limit = min(len(ordered), len(sorted_seats))
     return [
-        {"attendee_id": att["id"], "seat_id": sorted_seats[i]["id"]}
-        for i, att in enumerate(ordered)
+        {"attendee_id": ordered[i]["id"], "seat_id": sorted_seats[i]["id"]}
+        for i in range(limit)
     ]
 
 
@@ -615,11 +605,7 @@ def assign_seats_by_zone(
     Returns:
         List of {attendee_id, seat_id} assignment dicts.
     """
-    if len(attendees) > len(seats):
-        raise ValueError(
-            f"Not enough seats: {len(attendees)} attendees, {len(seats)} seats"
-        )
-    if not attendees:
+    if not attendees or not seats:
         return []
 
     if not zone_rules:
