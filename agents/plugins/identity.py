@@ -155,7 +155,7 @@ class IdentityPlugin(AgentPlugin):
             return None
         try:
             response = await llm.ainvoke([
-                {"role": "system", "content": _NAME_EXTRACT_PROMPT},
+                {"role": "system", "content": self._effective_prompt(_NAME_EXTRACT_PROMPT)},
                 {"role": "user", "content": message},
             ])
             data = extract_json(response.content)

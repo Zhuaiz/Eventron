@@ -79,6 +79,36 @@ async def activate_event(
     return EventResponse.model_validate(event)
 
 
+@router.post("/{event_id}/complete", response_model=EventResponse)
+async def complete_event(
+    event_id: uuid.UUID,
+    svc: EventService = Depends(get_event_service),
+):
+    """Mark an active event as completed."""
+    try:
+        event = await svc.complete_event(event_id)
+    except EventNotFoundError:
+        raise HTTPException(status_code=404, detail="Event not found")
+    except InvalidStateTransitionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return EventResponse.model_validate(event)
+
+
+@router.post("/{event_id}/cancel", response_model=EventResponse)
+async def cancel_event(
+    event_id: uuid.UUID,
+    svc: EventService = Depends(get_event_service),
+):
+    """Cancel an event (from draft or active)."""
+    try:
+        event = await svc.cancel_event(event_id)
+    except EventNotFoundError:
+        raise HTTPException(status_code=404, detail="Event not found")
+    except InvalidStateTransitionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return EventResponse.model_validate(event)
+
+
 @router.delete("/{event_id}", status_code=204)
 async def delete_event(
     event_id: uuid.UUID,

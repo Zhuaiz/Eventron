@@ -70,7 +70,11 @@ const ZONE_COLORS = [
   '#e94560', '#00b894', '#fd79a8', '#636e72', '#0984e3',
 ];
 
-const SEAT_RADIUS = 18;
+const SEAT_W = 50;   // seat width  (3 Chinese chars ≈ 39px @13px)
+const SEAT_H = 36;   // seat height
+const SEAT_RX = 5;   // corner radius — rounded-rect
+const SEL_PAD = 4;   // selection ring padding
+const BACK_H = 6;    // chair-back thickness
 const MIN_ZOOM = 0.3;
 const MAX_ZOOM = 3;
 // Zoom factor per wheel "step" (120 deltaY = 1 "notch" on most mice)
@@ -652,7 +656,7 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
             const isSelected = selectedSeat?.id === seat.id;
             const rotation = seat.rotation || 0;
             const displayLabel = seat.attendee_id
-              ? (att?.name?.slice(0, 2) || '✓')
+              ? (att?.name?.slice(0, 3) || '✓')
               : (seat.label || '');
 
             return (
@@ -662,15 +666,37 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
                 onClick={(e) => handleSeatClick(seat, e)}
                 style={{ cursor: paintMode ? 'crosshair' : 'pointer' }}
               >
-                <circle
-                  r={SEAT_RADIUS}
+                {/* Chair back — drawn first so it sits behind the seat */}
+                <rect
+                  x={-SEAT_W / 2 + 2}
+                  y={SEAT_H / 2 - 2}
+                  width={SEAT_W - 4}
+                  height={BACK_H}
+                  rx={3}
+                  ry={3}
+                  fill={isSelected ? '#4f46e5' : stroke}
+                  opacity={0.6}
+                />
+                {/* Main seat body (on top of back) */}
+                <rect
+                  x={-SEAT_W / 2}
+                  y={-SEAT_H / 2}
+                  width={SEAT_W}
+                  height={SEAT_H}
+                  rx={SEAT_RX}
+                  ry={SEAT_RX}
                   fill={fill}
                   stroke={isSelected ? '#4f46e5' : stroke}
-                  strokeWidth={isSelected ? 3 : 1.5}
+                  strokeWidth={isSelected ? 2.5 : 1.5}
                 />
                 {isSelected && (
-                  <circle
-                    r={SEAT_RADIUS + 4}
+                  <rect
+                    x={-(SEAT_W / 2 + SEL_PAD)}
+                    y={-(SEAT_H / 2 + SEL_PAD)}
+                    width={SEAT_W + SEL_PAD * 2}
+                    height={SEAT_H + SEL_PAD * 2}
+                    rx={SEAT_RX + 2}
+                    ry={SEAT_RX + 2}
                     fill="none"
                     stroke="#4f46e5"
                     strokeWidth={1.5}
@@ -680,14 +706,14 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
                 <text
                   textAnchor="middle"
                   dominantBaseline="central"
-                  fontSize={10}
-                  fontWeight="500"
+                  fontSize={13}
+                  fontWeight="600"
                   fill="#374151"
                   transform={`rotate(${-rotation})`}
                   style={{ pointerEvents: 'none', userSelect: 'none' }}
                 >
-                  {displayLabel.length > 3
-                    ? displayLabel.slice(0, 3)
+                  {displayLabel.length > 4
+                    ? displayLabel.slice(0, 4)
                     : displayLabel}
                 </text>
                 <title>

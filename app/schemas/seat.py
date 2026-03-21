@@ -97,6 +97,12 @@ class CustomLayoutRequest(BaseModel):
     )
 
 
+class ZoneRule(BaseModel):
+    """Maps a zone name to a minimum priority threshold."""
+    zone: str
+    min_priority: int = 0
+
+
 class AutoAssignRequest(BaseModel):
     """Request body for auto-assigning seats."""
 
@@ -104,5 +110,6 @@ class AutoAssignRequest(BaseModel):
         "random",
         pattern=r"^(random|priority_first|by_department|by_zone)$",
     )
+    zone_rules: list[ZoneRule] | None = None
     # priority_first: high-priority attendees get front/center seats
-    # by_zone: match attendee priority to seat zones
+    # by_zone: match attendee priority to seat zones (auto-infers if no rules)

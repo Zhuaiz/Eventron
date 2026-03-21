@@ -294,8 +294,9 @@ class PlannerPlugin(AgentPlugin):
             )
             context_parts.append(f"上传文件: {att_desc}")
 
-        system = PLANNER_SYSTEM.format(
-            context="\n".join(context_parts) or "无上下文"
+        prompt_tpl = self._effective_prompt(PLANNER_SYSTEM)
+        system = prompt_tpl.format(
+            context="\n".join(context_parts) or "无上下文",
         )
 
         msgs = [

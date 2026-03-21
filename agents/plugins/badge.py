@@ -159,7 +159,8 @@ class BadgePlugin(AgentPlugin):
 
         # Build message history — only pass recent clean messages
         # Avoid passing old AIMessages with tool_calls (no matching ToolMessages)
-        system = _BADGE_SYSTEM.format(
+        prompt_tpl = self._effective_prompt(_BADGE_SYSTEM)
+        system = prompt_tpl.format(
             event_id=event_id or "未选择",
         )
         llm_messages: list = [SystemMessage(content=system)]

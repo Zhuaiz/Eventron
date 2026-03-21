@@ -110,12 +110,20 @@ async def auto_assign(
 
     Strategies: random, priority_first, by_department, by_zone.
     """
+    zone_rules = (
+        [r.model_dump() for r in body.zone_rules]
+        if body.zone_rules
+        else None
+    )
     try:
         assignments = await svc.auto_assign(
-            event_id, strategy=body.strategy,
+            event_id, strategy=body.strategy, zone_rules=zone_rules,
         )
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        msg = str(e)
+        if "Not enough seats" in msg:
+            msg = f"座位不足：{msg.split(':')[-1].strip()}"
+        raise HTTPException(status_code=422, detail=msg)
     return {"assignments": assignments, "count": len(assignments)}
 
 

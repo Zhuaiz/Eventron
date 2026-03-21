@@ -54,6 +54,32 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
     },
   });
 
+  const completeMutation = useMutation({
+    mutationFn: () => apiClient.completeEvent(eventId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['event', eventId] });
+      setError('');
+      setSuccess('活动已完成');
+      setTimeout(() => setSuccess(''), 3000);
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : '操作失败');
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: () => apiClient.cancelEvent(eventId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['event', eventId] });
+      setError('');
+      setSuccess('活动已取消');
+      setTimeout(() => setSuccess(''), 3000);
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : '取消失败');
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: () => apiClient.deleteEvent(eventId),
     onSuccess: () => {
@@ -77,6 +103,18 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
   const handleActivate = () => {
     if (confirm('确定要激活此活动吗？激活后将无法编辑基本信息。')) {
       activateMutation.mutate();
+    }
+  };
+
+  const handleComplete = () => {
+    if (confirm('确定要结束此活动吗？结束后活动状态将变为「已完成」。')) {
+      completeMutation.mutate();
+    }
+  };
+
+  const handleCancel = () => {
+    if (confirm('确定要取消此活动吗？取消后可以重新设为草稿。')) {
+      cancelMutation.mutate();
     }
   };
 
@@ -108,15 +146,35 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
                 : '已取消'}
             </p>
           </div>
-          {event.status === 'draft' && (
-            <button
-              onClick={handleActivate}
-              disabled={activateMutation.isPending}
-              className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
-            >
-              {activateMutation.isPending ? '激活中...' : '激活活动'}
-            </button>
-          )}
+          <div className="flex gap-2">
+            {event.status === 'draft' && (
+              <button
+                onClick={handleActivate}
+                disabled={activateMutation.isPending}
+                className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+              >
+                {activateMutation.isPending ? '激活中...' : '激活活动'}
+              </button>
+            )}
+            {event.status === 'active' && (
+              <>
+                <button
+                  onClick={handleComplete}
+                  disabled={completeMutation.isPending}
+                  className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  {completeMutation.isPending ? '处理中...' : '结束活动'}
+                </button>
+                <button
+                  onClick={handleCancel}
+                  disabled={cancelMutation.isPending}
+                  className="px-6 py-2 bg-orange-500 text-white font-medium rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-colors"
+                >
+                  {cancelMutation.isPending ? '处理中...' : '取消活动'}
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -191,8 +249,8 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
         </button>
       </form>
 
-      {/* Danger Zone */}
-      {event.status === 'draft' && (
+      {/* Danger Zone — draft and cancelled events can be deleted */}
+      {(event.status === 'draft' || event.status === 'cancelled') && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-6">
           <div className="flex gap-3 mb-4">
             <AlertCircle className="text-red-600 flex-shrink-0" size={20} />

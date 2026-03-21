@@ -211,6 +211,12 @@ EventronError → NotFoundError(Event/Attendee/Seat/Template) | SeatNotAvailable
   - **Vite proxy**: Added `/p` proxy to backend for dev mode.
   - **page_render.py**: Added `event_id` param + `_load_js()` for inline JS injection.
 
+- **Phase 12** — Agent config system (runtime prompt/model editing):
+  - **Service**: `app/services/agent_config_service.py` — JSON-file-backed config store under `data/agent_config.json`. Defaults registered at startup from each plugin's hardcoded constants. Read/write with asyncio lock. Helpers: `get_effective_prompt()`, `get_effective_tier()`, `get_effective_gen_tier()`.
+  - **API**: `app/api/agent_config.py` — `GET /agent-config` (list all), `GET /agent-config/{name}` (detail), `PATCH /agent-config/{name}` (partial update), `POST /agent-config/{name}/reset` (revert to defaults).
+  - **Plugin wiring**: `AgentPlugin._effective_prompt(default)` and `_effective_tier()` in base class. All 7 plugins with system prompts + orchestrator updated to call these. Pagegen uses `get_effective_gen_tier()` for internal LLM.
+  - **Frontend**: `AgentSettingsPage` — card-based UI per plugin with expand/collapse, model tier selector (fast/smart/strong/max), system prompt textarea editor, enabled toggle, save/reset. Route `/agent-settings`, sidebar nav entry.
+
 ### Next 🔜
 - **Phase B (Portal)** — 物料计算与物料管理(按活动规模自动估算+手动调整), 铭牌设计(模板管理收进badge agent+活动内BadgeTab，外层菜单降级admin-only), 签到实时看板(WebSocket), 审批中心
 - **Phase C (Portal)** — 团队协作(多Organizer), 自动审批规则引擎

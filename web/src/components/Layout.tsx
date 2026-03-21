@@ -13,6 +13,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { label: 'AI 助手', href: '/assistant', icon: '✨' },
     { label: '活动管理', href: '/', icon: '📅' },
     { label: '模板管理', href: '/templates', icon: '🎨' },
+    { label: 'AI 设置', href: '/agent-settings', icon: '🤖' },
   ];
 
   const isActive = (href: string) => location.pathname === href;

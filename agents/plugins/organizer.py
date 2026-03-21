@@ -173,8 +173,9 @@ class OrganizerPlugin(AgentPlugin):
         # Build state context
         state_ctx = self._build_state_context(event_id, draft)
         today_str = date.today().isoformat()
-        system = ORGANIZER_SYSTEM.format(
-            today=today_str, state_context=state_ctx
+        prompt_tpl = self._effective_prompt(ORGANIZER_SYSTEM)
+        system = prompt_tpl.format(
+            today=today_str, state_context=state_ctx,
         )
 
         # Build messages for LLM (system + conversation history)

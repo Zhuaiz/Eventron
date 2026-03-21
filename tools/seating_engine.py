@@ -623,7 +623,28 @@ def assign_seats_by_zone(
         return []
 
     if not zone_rules:
-        return assign_seats_priority_first(attendees, seats)
+        # Auto-infer zone rules from existing seat zones.
+        # Zones whose seats have lower average row_num (closer to stage)
+        # get higher min_priority thresholds.
+        zone_names = sorted(
+            {s["zone"] for s in seats if s.get("zone")},
+        )
+        if not zone_names:
+            # No zones painted — fall back to priority_first
+            return assign_seats_priority_first(attendees, seats)
+
+        # Rank zones by average row_num (front zones = high priority)
+        zone_avg_row: dict[str, float] = {}
+        for z in zone_names:
+            rows = [s["row_num"] for s in seats if s.get("zone") == z]
+            zone_avg_row[z] = sum(rows) / len(rows) if rows else 999
+
+        ranked = sorted(zone_names, key=lambda z: zone_avg_row[z])
+        step = 100 // (len(ranked) + 1)
+        zone_rules = [
+            {"zone": z, "min_priority": max(1, (len(ranked) - i) * step)}
+            for i, z in enumerate(ranked)
+        ]
 
     # Sort rules by min_priority descending (highest zone first)
     sorted_rules = sorted(

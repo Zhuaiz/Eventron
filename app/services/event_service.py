@@ -71,11 +71,12 @@ class EventService:
         return await self.update_event(event_id, status="cancelled")
 
     async def delete_event(self, event_id: uuid.UUID) -> bool:
-        """Delete an event. Only drafts can be deleted."""
+        """Delete an event. Only draft or cancelled events can be deleted."""
         event = await self.get_event(event_id)
-        if event.status != "draft":
+        if event.status not in ("draft", "cancelled"):
             raise InvalidStateTransitionError(
-                f"Only draft events can be deleted (current: {event.status})"
+                f"Only draft or cancelled events can be deleted"
+                f" (current: {event.status})"
             )
         return await self._repo.delete(event_id)
 

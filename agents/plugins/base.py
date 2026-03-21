@@ -41,11 +41,38 @@ class AgentPlugin(ABC):
         return self._services.get("attendee")
 
     def get_llm(self, tier: str | None = None):
-        """Get an LLM instance for the requested tier."""
+        """Get an LLM instance for the requested tier.
+
+        If no explicit tier is given, checks agent_config overrides
+        before falling back to the plugin's hardcoded ``llm_model``.
+        """
+        if not tier:
+            tier = self._effective_tier()
         factory = self._services.get("llm_factory")
         if factory:
-            return factory(tier or self.llm_model or "smart")
+            return factory(tier or "smart")
         return None
+
+    def _effective_tier(self) -> str:
+        """Return model tier with config override support."""
+        try:
+            from app.services.agent_config_service import (
+                get_effective_tier,
+            )
+            return get_effective_tier(self.name)
+        except Exception:
+            return self.llm_model or "smart"
+
+    def _effective_prompt(self, default: str) -> str:
+        """Return system prompt with config override support."""
+        try:
+            from app.services.agent_config_service import (
+                get_effective_prompt,
+            )
+            prompt = get_effective_prompt(self.name)
+            return prompt if prompt else default
+        except Exception:
+            return default
 
     @staticmethod
     def get_event_files(

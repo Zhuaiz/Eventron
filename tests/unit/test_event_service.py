@@ -485,16 +485,17 @@ class TestEventServiceDelete:
 
         repo.delete.assert_not_called()
 
-    async def test_delete_cancelled_raises(self, svc, repo):
-        """Delete raises for cancelled events."""
+    async def test_delete_cancelled_succeeds(self, svc, repo):
+        """Delete succeeds for cancelled events."""
         event_id = uuid.uuid4()
         mock_event = _mock_event(status="cancelled")
         repo.get_by_id.return_value = mock_event
+        repo.delete.return_value = True
 
-        with pytest.raises(InvalidStateTransitionError, match="Only draft"):
-            await svc.delete_event(event_id)
+        result = await svc.delete_event(event_id)
 
-        repo.delete.assert_not_called()
+        assert result is True
+        repo.delete.assert_called_once_with(event_id)
 
     async def test_delete_not_found_raises(self, svc, repo):
         """Delete raises EventNotFoundError if event doesn't exist."""

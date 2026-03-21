@@ -10,6 +10,46 @@ interface ApiError {
   message?: string;
 }
 
+export interface AgentConfig {
+  name: string;
+  model_tier: string;
+  system_prompt: string;
+  enabled: boolean;
+  default_model_tier: string;
+  default_prompt_preview: string;
+  has_custom_prompt: boolean;
+  gen_model_tier: string;
+  default_gen_model_tier: string;
+}
+
+export interface AgentConfigDetail extends AgentConfig {
+  default_system_prompt: string;
+}
+
+export interface AgentConfigPatch {
+  model_tier?: string;
+  system_prompt?: string;
+  enabled?: boolean;
+  gen_model_tier?: string;
+}
+
+export interface LLMProviderInfo {
+  label: string;
+  provider: string;
+  model: string;
+  api_key_masked: string;
+  api_key_set: boolean;
+  base_url: string;
+  has_override: boolean;
+}
+
+export interface LLMProviderPatch {
+  model?: string;
+  api_key?: string;
+  base_url?: string;
+  provider?: string;
+}
+
 export class ApiClient {
   private getToken(): string | null {
     return localStorage.getItem('token');
@@ -104,6 +144,14 @@ export class ApiClient {
 
   async activateEvent(eventId: string) {
     return this.request('POST', `/events/${eventId}/activate`, {});
+  }
+
+  async completeEvent(eventId: string) {
+    return this.request('POST', `/events/${eventId}/complete`, {});
+  }
+
+  async cancelEvent(eventId: string) {
+    return this.request('POST', `/events/${eventId}/cancel`, {});
   }
 
   async duplicateEvent(eventId: string) {
@@ -477,6 +525,36 @@ export class ApiClient {
 
   async deleteBadgeTemplate(templateId: string) {
     return this.request('DELETE', `/v1/badge-templates/${templateId}`);
+  }
+
+  // Agent Config
+  async getAgentConfigs() {
+    return this.request<AgentConfig[]>('GET', '/v1/agent-config');
+  }
+
+  async getAgentConfig(name: string) {
+    return this.request<AgentConfigDetail>('GET', `/v1/agent-config/${name}`);
+  }
+
+  async updateAgentConfig(name: string, data: Partial<AgentConfigPatch>) {
+    return this.request<AgentConfigDetail>('PATCH', `/v1/agent-config/${name}`, data);
+  }
+
+  async resetAgentConfig(name: string) {
+    return this.request<AgentConfigDetail>('POST', `/v1/agent-config/${name}/reset`);
+  }
+
+  // LLM Providers
+  async getLLMProviders() {
+    return this.request<Record<string, LLMProviderInfo>>('GET', '/v1/llm-providers');
+  }
+
+  async updateLLMProvider(tier: string, data: LLMProviderPatch) {
+    return this.request<Record<string, LLMProviderInfo>>('PATCH', `/v1/llm-providers/${tier}`, data);
+  }
+
+  async resetLLMProviders() {
+    return this.request<Record<string, LLMProviderInfo>>('POST', '/v1/llm-providers/reset');
   }
 }
 

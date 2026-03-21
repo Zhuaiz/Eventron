@@ -8,6 +8,7 @@ import { EventListPage } from './pages/EventListPage';
 import { EventDetailPage } from './pages/EventDetailPage';
 import { BadgeTemplatesPage } from './pages/BadgeTemplatesPage';
 import { AssistantPage } from './pages/AssistantPage';
+import { AgentSettingsPage } from './pages/AgentSettingsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -52,6 +53,16 @@ function App() {
                 <ProtectedRoute>
                   <Layout>
                     <AssistantPage />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/agent-settings"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <AgentSettingsPage />
                   </Layout>
                 </ProtectedRoute>
               }

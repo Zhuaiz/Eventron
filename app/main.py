@@ -12,7 +12,9 @@ from app.config import settings
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan — startup and shutdown hooks."""
-    # Startup: init DB pool, Redis, register plugins, etc.
+    # Startup: register agent plugin config defaults
+    from app.services.agent_config_defaults import register_all_defaults
+    register_all_defaults()
     yield
     # Shutdown: close connections
 
@@ -64,6 +66,11 @@ def create_app() -> FastAPI:
     app.include_router(export_router, prefix="/api/v1", tags=["export"])
     app.include_router(event_files_router, prefix="/api/v1", tags=["event-files"])
     app.include_router(agent_chat_router, prefix="/api/v1/agent", tags=["agent"])
+
+    from app.api.agent_config import router as agent_config_router
+    app.include_router(
+        agent_config_router, prefix="/api/v1", tags=["agent-config"],
+    )
 
     # ── Public Routes (no JWT) ──────────────────────────────────
     from app.api.public_checkin import router as public_checkin_router

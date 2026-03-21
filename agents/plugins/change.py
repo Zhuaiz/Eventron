@@ -110,7 +110,8 @@ class ChangePlugin(AgentPlugin):
                 "turn_output": reply,
             }
 
-        system = _CHANGE_SYSTEM.format(user_context=user_ctx)
+        prompt_tpl = self._effective_prompt(_CHANGE_SYSTEM)
+        system = prompt_tpl.format(user_context=user_ctx)
         try:
             response = await llm.ainvoke([
                 {"role": "system", "content": system},

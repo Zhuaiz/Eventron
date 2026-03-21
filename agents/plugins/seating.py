@@ -154,7 +154,7 @@ class SeatingPlugin(AgentPlugin):
 
         # Build message list: system + recent conversation history
         messages: list[Any] = [
-            {"role": "system", "content": _SYSTEM},
+            {"role": "system", "content": self._effective_prompt(_SYSTEM)},
         ]
 
         # Include recent conversation for context (last 10 messages)

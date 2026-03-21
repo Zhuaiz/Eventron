@@ -135,9 +135,16 @@ class PagegenPlugin(AgentPlugin):
         if not llm:
             return self._fallback()
 
-        # Internal page generation LLM — max tier (Opus) for
-        # high-quality full-page HTML/CSS generation
-        gen_llm = self.get_llm("max") or llm
+        # Internal page generation LLM — configurable via agent settings
+        # Default: max tier (Opus) for high-quality full-page generation
+        try:
+            from app.services.agent_config_service import (
+                get_effective_gen_tier,
+            )
+            gen_tier = get_effective_gen_tier("pagegen") or "max"
+        except Exception:
+            gen_tier = "max"
+        gen_llm = self.get_llm(gen_tier) or llm
 
         # Pass gen_llm to make_checkin_tools so deploy_custom_checkin_page
         # uses the most powerful model for HTML generation
@@ -152,7 +159,8 @@ class PagegenPlugin(AgentPlugin):
         llm_with_tools = llm.bind_tools(tools)
 
         # Build message history
-        system = _PAGEGEN_SYSTEM.format(event_id=event_id)
+        prompt_tpl = self._effective_prompt(_PAGEGEN_SYSTEM)
+        system = prompt_tpl.format(event_id=event_id)
         messages: list[Any] = [
             {"role": "system", "content": system},
         ]

@@ -48,7 +48,19 @@ async def classify_intent(
         Plugin name string, or 'chat' for general conversation.
     """
     plugin_descriptions = registry.build_routing_prompt()
-    system_prompt = ROUTER_SYSTEM_TEMPLATE.format(
+
+    # Use config override if available
+    try:
+        from app.services.agent_config_service import (
+            get_effective_prompt,
+        )
+        tpl = get_effective_prompt("orchestrator")
+        if not tpl:
+            tpl = ROUTER_SYSTEM_TEMPLATE
+    except Exception:
+        tpl = ROUTER_SYSTEM_TEMPLATE
+
+    system_prompt = tpl.format(
         today=date.today().isoformat(),
         plugin_descriptions=plugin_descriptions,
     )
