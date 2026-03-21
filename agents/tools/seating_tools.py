@@ -430,6 +430,100 @@ def make_seating_tools(
         await seat_svc.unassign_seat(current.id)
         return f"已取消 {name} 的座位 {current.label}"
 
+    # ── Area (venue zone) management tools ────────────────────
+    @tool
+    async def list_areas() -> str:
+        """查看当前活动的所有区域（如贵宾区、观众席等）。
+        每个区域有独立的布局类型、行列数和画布偏移。"""
+        areas = await seat_svc.list_areas(eid)
+        if not areas:
+            return "当前没有区域。可以用 create_area 创建。"
+        lines = [f"共 {len(areas)} 个区域:"]
+        for a in areas:
+            seats = await seat_svc.get_seats(eid)
+            area_seats = [s for s in seats if s.area_id == a.id]
+            lines.append(
+                f"  - {a.name} ({a.layout_type} {a.rows}×{a.cols})"
+                f" 座位{len(area_seats)}个"
+                f"{' · 舞台:' + a.stage_label if a.stage_label else ''}"
+                f" [偏移 x={a.offset_x}, y={a.offset_y}]"
+            )
+        return "\n".join(lines)
+
+    @tool
+    async def create_area(
+        name: str,
+        layout_type: str = "grid",
+        rows: int = 5,
+        cols: int = 10,
+        offset_x: float = 0.0,
+        offset_y: float = 0.0,
+        stage_label: str = "",
+    ) -> str:
+        """创建一个新的区域（场馆分区）。创建后可用 generate_area_layout 生成该区域的座位。
+
+        Args:
+            name: 区域名称，如 "观众席"、"贵宾区"、"贵宾室"
+            layout_type: 布局类型 grid|theater|roundtable|banquet|u_shape|classroom
+            rows: 排数
+            cols: 每排座位数
+            offset_x: 在画布上的水平偏移（多区域时用于错开位置）
+            offset_y: 在画布上的垂直偏移
+            stage_label: 舞台/讲台标签（可选），如 "舞台"、"主席台"
+        """
+        existing = await seat_svc.list_areas(eid)
+        display_order = len(existing)
+        area = await seat_svc.create_area(
+            eid,
+            name=name,
+            layout_type=layout_type,
+            rows=rows,
+            cols=cols,
+            display_order=display_order,
+            offset_x=offset_x,
+            offset_y=offset_y,
+            stage_label=stage_label or None,
+        )
+        return (
+            f"已创建区域: {area.name} ({layout_type} {rows}×{cols})"
+            f" 偏移({offset_x},{offset_y})"
+            f"\n接下来调用 generate_area_layout 为该区域生成座位。"
+        )
+
+    @tool
+    async def generate_area_layout(area_name: str) -> str:
+        """为指定区域生成座位布局（替换该区域已有座位，不影响其他区域）。
+
+        Args:
+            area_name: 区域名称（需先用 create_area 创建）
+        """
+        areas = await seat_svc.list_areas(eid)
+        area = next((a for a in areas if a.name == area_name), None)
+        if not area:
+            names = ", ".join(a.name for a in areas) if areas else "无"
+            return f"未找到区域: {area_name}。当前区域: {names}"
+        seats = await seat_svc.generate_area_layout(eid, area.id)
+        return (
+            f"已为 {area_name} 生成 {len(seats)} 个座位"
+            f" ({area.layout_type} {area.rows}×{area.cols})"
+        )
+
+    @tool
+    async def delete_area(area_name: str) -> str:
+        """删除指定区域及其所有座位。
+
+        Args:
+            area_name: 区域名称
+        """
+        areas = await seat_svc.list_areas(eid)
+        area = next((a for a in areas if a.name == area_name), None)
+        if not area:
+            return f"未找到区域: {area_name}"
+        deleted = await seat_svc.delete_area(area.id)
+        if deleted:
+            return f"已删除区域 {area_name} 及其所有座位"
+        return f"删除失败: {area_name}"
+
     return [
         get_event_info,
         view_seats,
@@ -445,4 +539,8 @@ def make_seating_tools(
         swap_two_attendees,
         reassign_attendee_seat,
         unassign_attendee,
+        list_areas,
+        create_area,
+        generate_area_layout,
+        delete_area,
     ]

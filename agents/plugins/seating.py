@@ -41,6 +41,7 @@ _SYSTEM = """\
 6. **换座/调座**: 交换两位参会者的座位、将某人移到指定座位、取消座位分配
 7. **Excel 分析**: 读取上传的 Excel 文件，提取布局和人员信息
 8. **导入参会者**: 从 Excel 或用户描述批量导入参会者
+9. **区域管理**: 创建多个区域（如贵宾区、观众席），每个区域独立布局和偏移定位
 
 ## ★ 核心原则：操作必须完成全流程
 
@@ -78,6 +79,20 @@ _SYSTEM = """\
    - 有优先级时用 `priority_first`
    - 默认用 `priority_first`
 7. **`view_seats`** — 最终验证，确认分配率
+
+## 多区域（VenueArea）工作流
+
+当场馆有多个区域（如 Excel 有多个 sheet，或用户说"贵宾区+观众席"）时：
+
+1. **`create_area`** — 为每个区域创建（指定 layout_type, rows, cols, offset_x/y）
+   - 多个区域用 offset_y 错开，比如观众席 offset_y=0，贵宾区 offset_y=500
+   - offset_x 用于水平排列的区域
+2. **`generate_area_layout`** — 为每个区域生成座位
+3. **`set_zone`** — 分区（区域内的座位可按排号设不同分区）
+4. **`auto_assign`** — 排座（区域的座位自动带有 area_id）
+5. **`view_seats`** — 验证
+
+注意：`create_layout` 是全局布局（替换所有座位），而区域系统通过 `create_area` + `generate_area_layout` 实现**叠加式**布局，各区域独立不互相覆盖。
 
 ## 工作流程
 

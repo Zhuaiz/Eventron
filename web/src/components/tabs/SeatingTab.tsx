@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Grid3X3, Shuffle, Users, Download, Sparkles,
   Paintbrush, X, ZoomIn, ZoomOut, Move, MousePointer,
-  UserPlus, XCircle, Maximize,
+  UserPlus, XCircle, Maximize, Layers, Plus, Trash2,
 } from 'lucide-react';
 import { apiClient } from '../../lib/api';
 import type { VenueArea } from '../../lib/api';
@@ -151,6 +151,14 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
   const [showAssignPicker, setShowAssignPicker] = useState(false);
   const [assignSearch, setAssignSearch] = useState('');
 
+  // Area management
+  const [showAreaPanel, setShowAreaPanel] = useState(false);
+  const [newAreaName, setNewAreaName] = useState('');
+  const [newAreaLayout, setNewAreaLayout] = useState('grid');
+  const [newAreaRows, setNewAreaRows] = useState(5);
+  const [newAreaCols, setNewAreaCols] = useState(10);
+  const [newAreaStage, setNewAreaStage] = useState('');
+
   // SVG pan/zoom
   const zoomRef = useRef(1);
   const [zoom, _setZoom] = useState(1);
@@ -284,6 +292,43 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
           });
         }
       }
+      queryClient.invalidateQueries({ queryKey: ['seats', eventId] });
+    },
+  });
+
+  // ── area mutations ──
+  const createAreaMutation = useMutation({
+    mutationFn: async () => {
+      const area = await apiClient.createArea(eventId, {
+        name: newAreaName,
+        layout_type: newAreaLayout,
+        rows: newAreaRows,
+        cols: newAreaCols,
+        stage_label: newAreaStage || null,
+      });
+      // Auto-generate layout for this area
+      await apiClient.generateAreaLayout(eventId, area.id);
+      return area;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['areas', eventId] });
+      queryClient.invalidateQueries({ queryKey: ['seats', eventId] });
+      setNewAreaName('');
+      setNewAreaStage('');
+    },
+  });
+
+  const deleteAreaMutation = useMutation({
+    mutationFn: (areaId: string) => apiClient.deleteArea(eventId, areaId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['areas', eventId] });
+      queryClient.invalidateQueries({ queryKey: ['seats', eventId] });
+    },
+  });
+
+  const regenAreaMutation = useMutation({
+    mutationFn: (areaId: string) => apiClient.generateAreaLayout(eventId, areaId),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['seats', eventId] });
     },
   });
@@ -1214,6 +1259,17 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
               <Paintbrush size={14} />
               {paintMode ? '退出涂色' : '涂色'}
             </button>
+            <button
+              onClick={() => setShowAreaPanel(!showAreaPanel)}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-sm font-medium transition-colors ${
+                showAreaPanel
+                  ? 'bg-purple-600 text-white'
+                  : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <Layers size={14} />
+              区域{(areas as VenueArea[]).length > 0 ? ` (${(areas as VenueArea[]).length})` : ''}
+            </button>
 
             {/* Stats (right-aligned) */}
             <div className="flex items-center gap-1 text-xs text-gray-500 ml-auto">
@@ -1316,6 +1372,111 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
                   {z.name}
                 </span>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* ═══ Area Management Panel ═══ */}
+        {showAreaPanel && (
+          <div className="bg-white rounded-lg shadow px-4 py-3 text-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="font-semibold text-gray-800 flex items-center gap-1.5">
+                <Layers size={15} /> 区域管理
+              </h4>
+              <button onClick={() => setShowAreaPanel(false)} className="p-1 hover:bg-gray-100 rounded">
+                <X size={14} className="text-gray-400" />
+              </button>
+            </div>
+
+            {/* Existing areas */}
+            {(areas as VenueArea[]).length > 0 && (
+              <div className="space-y-1.5">
+                {(areas as VenueArea[]).map((a) => (
+                  <div key={a.id} className="flex items-center justify-between px-3 py-1.5 bg-gray-50 rounded">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-gray-700">{a.name}</span>
+                      <span className="text-xs text-gray-400">
+                        {a.layout_type} {a.rows}×{a.cols}
+                        {a.stage_label && ` · ${a.stage_label}`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => regenAreaMutation.mutate(a.id)}
+                        disabled={regenAreaMutation.isPending}
+                        className="px-2 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50 rounded"
+                        title="重新生成该区域座位"
+                      >
+                        <Grid3X3 size={12} />
+                      </button>
+                      <button
+                        onClick={() => { if (confirm(`确定删除 ${a.name}？`)) deleteAreaMutation.mutate(a.id); }}
+                        className="px-2 py-0.5 text-xs text-red-500 hover:bg-red-50 rounded"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Add new area form */}
+            <div className="border-t pt-2 flex flex-wrap items-end gap-2">
+              <div>
+                <label className="text-[11px] text-gray-500">名称</label>
+                <input
+                  value={newAreaName}
+                  onChange={(e) => setNewAreaName(e.target.value)}
+                  placeholder="如：贵宾区"
+                  className="block w-24 px-2 py-1 border border-gray-300 rounded text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-gray-500">布局</label>
+                <select
+                  value={newAreaLayout}
+                  onChange={(e) => setNewAreaLayout(e.target.value)}
+                  className="block px-1 py-1 border border-gray-300 rounded text-xs"
+                >
+                  {LAYOUT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] text-gray-500">行×列</label>
+                <div className="flex items-center gap-0.5">
+                  <input
+                    type="number" min={1} max={50} value={newAreaRows}
+                    onChange={(e) => setNewAreaRows(Number(e.target.value))}
+                    className="w-12 px-1 py-1 border border-gray-300 rounded text-xs text-center"
+                  />
+                  <span className="text-gray-400 text-xs">×</span>
+                  <input
+                    type="number" min={1} max={50} value={newAreaCols}
+                    onChange={(e) => setNewAreaCols(Number(e.target.value))}
+                    className="w-12 px-1 py-1 border border-gray-300 rounded text-xs text-center"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] text-gray-500">舞台标签</label>
+                <input
+                  value={newAreaStage}
+                  onChange={(e) => setNewAreaStage(e.target.value)}
+                  placeholder="可选"
+                  className="block w-20 px-2 py-1 border border-gray-300 rounded text-xs"
+                />
+              </div>
+              <button
+                onClick={() => createAreaMutation.mutate()}
+                disabled={!newAreaName.trim() || createAreaMutation.isPending}
+                className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600 text-white rounded text-xs hover:bg-indigo-700 disabled:opacity-50"
+              >
+                <Plus size={13} />
+                {createAreaMutation.isPending ? '创建中...' : '添加区域'}
+              </button>
             </div>
           </div>
         )}
