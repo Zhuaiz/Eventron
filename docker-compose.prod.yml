@@ -73,7 +73,7 @@ services:
       - "443:443"
     volumes:
       - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./deploy/nginx-ssl:/etc/nginx/ssl:ro
+      - /opt/eventron/ssl:/etc/nginx/ssl:ro
     depends_on:
       app:
         condition: service_healthy
