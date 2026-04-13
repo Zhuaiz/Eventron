@@ -1,8 +1,7 @@
 # ============================================================
 # Eventron CD — Deploy to Aliyun (上海)
 # Triggers: push to main (after CI passes)
-# Strategy: SSH → git pull → docker compose build → up
-# (在服务器上构建，避免跨境传输大镜像)
+# Strategy: rsync 从 Actions runner 推代码到服务器（服务器无需访问 GitHub）
 # ============================================================
 name: Deploy
 
@@ -13,7 +12,7 @@ on:
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: false  # 不中断正在进行的部署
+  cancel-in-progress: false
 
 jobs:
   ci-gate:
@@ -26,7 +25,32 @@ jobs:
     needs: ci-gate
     environment: prod
     steps:
-      - name: Deploy via SSH
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_PASSWORD }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Rsync code to server
+        run: |
+          rsync -az --delete \
+            --exclude='.git' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='.env' \
+            --exclude='data/' \
+            --exclude='uploads/' \
+            --exclude='pgdata/' \
+            --exclude='web/node_modules/' \
+            --exclude='web/dist/' \
+            -e "ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=no -p 22" \
+            ./ ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/opt/eventron/repo/
+
+      - name: Deploy on server
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -36,41 +60,24 @@ jobs:
           command_timeout: 15m
           script: |
             set -euo pipefail
-
             DEPLOY_DIR=/opt/eventron
-            # 国内用 ghproxy 镜像加速
-            PROXY=https://ghproxy.net
-            REPO_URL=${PROXY}/https://${{ secrets.GH_PAT }}@github.com/AntiNoise-ai/Eventron.git
-            REPO_URL_CLEAN=${PROXY}/https://github.com/AntiNoise-ai/Eventron.git
-
-            echo "=== [1/5] 拉取最新代码 ==="
-            if [ ! -d "$DEPLOY_DIR/repo" ]; then
-                git clone "$REPO_URL" "$DEPLOY_DIR/repo"
-            else
-                cd "$DEPLOY_DIR/repo"
-                git remote set-url origin "$REPO_URL"
-                git fetch origin main
-                git reset --hard origin/main
-                # 清掉 token
-                git remote set-url origin "$REPO_URL_CLEAN"
-            fi
 
             cd "$DEPLOY_DIR/repo"
 
-            echo "=== [2/5] 同步 .env ==="
+            echo "=== [1/4] 同步 .env ==="
             if [ ! -f "$DEPLOY_DIR/.env" ]; then
                 echo "❌ 缺少 $DEPLOY_DIR/.env，请先配置！"
                 exit 1
             fi
             cp "$DEPLOY_DIR/.env" .env
 
-            echo "=== [3/5] 构建镜像 ==="
-            docker compose -f docker-compose.prod.yml build --no-cache app
+            echo "=== [2/4] 构建镜像 ==="
+            docker compose -f docker-compose.prod.yml build app
 
-            echo "=== [4/5] 滚动更新 ==="
+            echo "=== [3/4] 滚动更新 ==="
             docker compose -f docker-compose.prod.yml up -d
 
-            echo "=== [5/5] 清理旧镜像 ==="
+            echo "=== [4/4] 清理旧镜像 ==="
             docker image prune -f
 
             echo "=== 等待健康检查 ==="
@@ -82,6 +89,10 @@ jobs:
                 docker compose -f docker-compose.prod.yml logs --tail=30 app
                 exit 1
             fi
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/id_deploy
 
       - name: Notify result
         if: always()
