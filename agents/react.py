@@ -44,6 +44,14 @@ _TOOL_NAMES_ZH: dict[str, str] = {
     "reassign_attendee_seat": "调整座位",
     "unassign_attendee": "取消座位分配",
     # Check-in / page tools
+    # General query tools
+    "list_events": "查看活动列表",
+    "get_event_detail": "查看活动详情",
+    "get_event_summary": "活动总览",
+    # Structured seat-chart tools
+    "analyze_seat_chart": "分析座位表",
+    "import_from_seat_chart": "导入座位表",
+    # Check-in tools
     "get_checkin_stats": "查看签到统计",
     "get_checkin_url": "获取签到链接",
     "generate_checkin_qr": "生成签到二维码",
@@ -55,6 +63,26 @@ _TOOL_NAMES_ZH: dict[str, str] = {
     "get_current_page_source": "读取当前页面源码",
     "patch_page_css": "追加CSS样式",
     "update_page_source": "更新页面源码",
+    # Delegate routing tools (orchestrator → plugin)
+    "delegate_to_planner": "任务规划",
+    "delegate_to_organizer": "活动管理",
+    "delegate_to_seating": "智能排座",
+    "delegate_to_checkin": "签到管理",
+    "delegate_to_change": "座位变更",
+    "delegate_to_badge": "铭牌设计",
+    "delegate_to_pagegen": "页面设计",
+    "delegate_to_guide": "使用指南",
+    # Multi-area tools
+    "list_areas": "查看区域列表",
+    "create_area": "创建区域",
+    "generate_area_layout": "生成区域布局",
+    "delete_area": "删除区域",
+    # Badge tools
+    "design_template": "设计铭牌模板",
+    "generate_badges": "生成铭牌",
+    # Staging tools
+    "confirm_staged_page": "确认上线",
+    "rollback_page": "回滚页面",
 }
 
 

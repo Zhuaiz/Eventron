@@ -37,6 +37,18 @@ class SeatingService:
         self._attendee_repo = attendee_repo
         self._area_repo = area_repo
 
+    def begin_nested(self):
+        """Create a SAVEPOINT for atomic multi-step operations.
+
+        Usage::
+
+            async with seat_svc.begin_nested():
+                await seat_svc.create_area(...)
+                await seat_svc.generate_area_layout(...)
+                # rolls back ALL if any step raises
+        """
+        return self._seat_repo._session.begin_nested()
+
     # ------------------------------------------------------------------
     # Venue layout creation
     # ------------------------------------------------------------------

@@ -4,16 +4,39 @@
  * Features:
  * - Markdown rendering (react-markdown)
  * - Tool call status indicators
- * - HITL interactive choice buttons
+ * - HITL quick-reply buttons (structured from API)
  * - File attachment badges
  */
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { visit } from 'unist-util-visit';
 import {
   Bot, User, FileImage, FileSpreadsheet, FileText,
   ExternalLink, Wrench, CheckCircle2, XCircle,
   ThumbsUp, ThumbsDown, Activity,
 } from 'lucide-react';
+import type { MessagePart } from '../lib/api';
+import { MessageParts } from './MessagePartCards';
+
+/**
+ * Inline remark plugin: convert soft line breaks (\n) to hard breaks (<br>).
+ * Equivalent to remark-breaks — avoids extra npm dependency.
+ */
+function remarkBreaks() {
+  return (tree: any) => {
+    visit(tree, 'text', (node: any, index: number | undefined, parent: any) => {
+      if (!parent || index === undefined) return;
+      const parts = node.value.split('\n');
+      if (parts.length <= 1) return;
+      const newChildren: any[] = [];
+      parts.forEach((part: string, i: number) => {
+        if (i > 0) newChildren.push({ type: 'break' });
+        if (part) newChildren.push({ type: 'text', value: part });
+      });
+      parent.children.splice(index, 1, ...newChildren);
+    });
+  };
+}
 
 export interface ToolCallInfo {
   tool_name: string;
@@ -30,6 +53,12 @@ export interface ReflectionInfo {
   metrics: Record<string, any>;
 }
 
+export interface QuickReplyData {
+  label: string;
+  value: string;
+  style?: 'primary' | 'default' | 'danger';
+}
+
 export interface ChatMessageData {
   role: 'user' | 'assistant';
   content: string;
@@ -38,8 +67,12 @@ export interface ChatMessageData {
   eventId?: string;
   toolCalls?: ToolCallInfo[];
   reflection?: ReflectionInfo;
-  /** HITL: choices parsed from agent response */
+  /** Structured quick-reply buttons from API */
+  quickReplies?: QuickReplyData[];
+  /** Legacy: text-parsed choices (fallback) */
   choices?: string[];
+  /** Structured UI card parts from agent tools */
+  parts?: MessagePart[];
 }
 
 interface ChatMessageProps {
@@ -101,6 +134,52 @@ function ToolCallList({ calls, compact }: { calls: ToolCallInfo[]; compact?: boo
   );
 }
 
+/** Styled quick-reply buttons from structured API data. */
+function QuickReplyButtons({
+  replies,
+  onSelect,
+  compact,
+}: {
+  replies: QuickReplyData[];
+  onSelect?: (value: string) => void;
+  compact?: boolean;
+}) {
+  const [clicked, setClicked] = useState(false);
+  if (clicked) return null; // Hide after click
+
+  const styleMap = {
+    primary: compact
+      ? 'bg-indigo-600 text-white hover:bg-indigo-700 px-2.5 py-1 text-[11px]'
+      : 'bg-indigo-600 text-white hover:bg-indigo-700 px-4 py-1.5 text-xs',
+    default: compact
+      ? 'border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 px-2.5 py-1 text-[11px]'
+      : 'border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 px-4 py-1.5 text-xs',
+    danger: compact
+      ? 'border border-red-300 text-red-600 bg-white hover:bg-red-50 px-2.5 py-1 text-[11px]'
+      : 'border border-red-300 text-red-600 bg-white hover:bg-red-50 px-4 py-1.5 text-xs',
+  };
+
+  return (
+    <div className={`mt-2 flex flex-wrap ${compact ? 'gap-1.5' : 'gap-2'}`}>
+      {replies.map((r, i) => (
+        <button
+          key={i}
+          onClick={() => {
+            setClicked(true);
+            onSelect?.(r.value || r.label);
+          }}
+          className={`rounded-lg font-medium transition-colors ${
+            styleMap[r.style || 'default']
+          }`}
+        >
+          {r.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Legacy text-parsed choice buttons (fallback). */
 function ChoiceButtons({
   choices,
   onSelect,
@@ -247,7 +326,7 @@ export function ChatMessage({ message, compact, onNavigateEvent, onChoiceSelect,
           ) : (
             // Assistant messages: render as Markdown
             <div className={`prose prose-sm max-w-none ${compact ? 'prose-xs' : ''} prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-1.5 prose-pre:my-1 prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-code:text-indigo-600 prose-code:bg-indigo-50 prose-code:px-1 prose-code:rounded`}>
-              <ReactMarkdown>{message.content}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkBreaks]}>{message.content}</ReactMarkdown>
             </div>
           )}
         </div>
@@ -257,8 +336,23 @@ export function ChatMessage({ message, compact, onNavigateEvent, onChoiceSelect,
           <ToolCallList calls={message.toolCalls} compact={compact} />
         )}
 
-        {/* HITL choice buttons */}
-        {!isUser && message.choices && message.choices.length > 0 && (
+        {/* Structured UI card parts */}
+        {!isUser && message.parts && message.parts.length > 0 && (
+          <MessageParts
+            parts={message.parts}
+            compact={compact}
+            onNavigateEvent={onNavigateEvent}
+            onChoiceSelect={onChoiceSelect}
+          />
+        )}
+
+        {/* Structured quick-reply buttons (preferred) */}
+        {!isUser && message.quickReplies && message.quickReplies.length > 0 && (
+          <QuickReplyButtons replies={message.quickReplies} onSelect={onChoiceSelect} compact={compact} />
+        )}
+
+        {/* Legacy HITL choice buttons (fallback when no quickReplies) */}
+        {!isUser && !message.quickReplies?.length && message.choices && message.choices.length > 0 && (
           <ChoiceButtons choices={message.choices} onSelect={onChoiceSelect} compact={compact} />
         )}
 
@@ -290,11 +384,10 @@ export function ChatMessage({ message, compact, onNavigateEvent, onChoiceSelect,
 }
 
 /**
- * Parse HITL choices from agent message.
+ * Parse HITL choices from agent message (legacy fallback).
  *
  * Detects patterns like:
  * - "1. 选项A\n2. 选项B\n3. 选项C"
- * - "A) 选项A  B) 选项B"
  * - Lines ending with ? followed by lines starting with - or ·
  */
 export function parseChoices(content: string): string[] {

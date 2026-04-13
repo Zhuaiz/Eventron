@@ -1,13 +1,21 @@
-"""Tests for orchestrator — mock LLM, verify routing decisions."""
+"""Tests for orchestrator — verify tool-calling routing architecture.
 
-from unittest.mock import AsyncMock, MagicMock
+Post-refactor: orchestrator is a ReAct agent with delegate_to_{plugin}
+tools + utility tools. Tests verify:
+1. Delegate tools are built correctly from registry
+2. Scope filtering works
+3. Identity pre-check works
+4. Plugin registry basics (unchanged)
+"""
+
+from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from agents.orchestrator import classify_intent
 from agents.plugins.base import AgentPlugin
 from agents.registry import PluginRegistry
+from agents.tools.routing_tools import make_delegate_tools
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -47,97 +55,139 @@ class DummyPlugin(AgentPlugin):
 def _make_state(msg: str, user_profile=None, event_id=None):
     return {
         "messages": [HumanMessage(content=msg)],
-        "current_plugin": "chat",
+        "current_plugin": "",
         "user_profile": user_profile,
         "event_id": event_id,
         "pending_approval": None,
         "turn_output": None,
+        "plan_output": None,
+        "attachments": [],
+        "task_plan": [],
+        "event_draft": None,
+        "scope": None,
+        "parts": [],
+        "tool_calls": [],
+        "quick_replies": [],
+        "reflection": None,
     }
-
-
-def _mock_llm(response: str):
-    llm = AsyncMock()
-    llm.ainvoke.return_value = AIMessage(content=response)
-    return llm
 
 
 def _build_registry():
     reg = PluginRegistry()
     reg.register(DummyPlugin("seating", ["排座", "座位", "assign"]))
     reg.register(DummyPlugin("checkin", ["签到", "check-in", "checkin"]))
-    reg.register(DummyPlugin("identity", ["我是", "身份", "who"], requires_id=False))
+    reg.register(DummyPlugin(
+        "identity", ["我是", "身份", "who"], requires_id=False,
+    ))
     reg.register(DummyPlugin("change", ["换座", "请假", "swap"]))
     return reg
 
 
-# ── Tests ────────────────────────────────────────────────────
+# ── Tests: Delegate Tool Construction ────────────────────────
 
-class TestClassifyIntent:
-    """Verify orchestrator routes correctly based on LLM output."""
+class TestMakeDelegateTools:
+    """Verify delegate tools are built correctly from registry."""
 
-    async def test_routes_to_seating(self):
-        """LLM says 'seating' → route to seating plugin."""
-        state = _make_state("帮我排座", user_profile={"name": "张三"})
-        llm = _mock_llm("seating")
+    def test_creates_tool_per_plugin_except_identity(self):
+        """Each active non-identity plugin gets a delegate tool."""
         reg = _build_registry()
+        state = _make_state("test", user_profile={"name": "张三"})
+        acc_upd, acc_parts, acc_tc = {}, [], []
 
-        intent = await classify_intent(state, reg, llm)
-        assert intent == "seating"
+        tools = make_delegate_tools(
+            reg, state, {}, acc_upd, acc_parts, acc_tc,
+        )
+        names = {t.name for t in tools}
+        # identity should be excluded
+        assert "delegate_to_identity" not in names
+        assert "delegate_to_seating" in names
+        assert "delegate_to_checkin" in names
+        assert "delegate_to_change" in names
 
-    async def test_routes_to_checkin(self):
-        """LLM says 'checkin' → route to checkin plugin."""
-        state = _make_state("签到", user_profile={"name": "李四"})
-        llm = _mock_llm("checkin")
+    def test_scope_filters_to_single_plugin(self):
+        """When scope='seating', only delegate_to_seating is exposed."""
         reg = _build_registry()
+        state = _make_state("test", user_profile={"name": "张三"})
+        acc_upd, acc_parts, acc_tc = {}, [], []
 
-        intent = await classify_intent(state, reg, llm)
-        assert intent == "checkin"
+        tools = make_delegate_tools(
+            reg, state, {}, acc_upd, acc_parts, acc_tc,
+            scope="seating",
+        )
+        names = {t.name for t in tools}
+        assert names == {"delegate_to_seating"}
 
-    async def test_unknown_plugin_falls_to_chat(self):
-        """LLM outputs unknown plugin name → fallback to chat."""
-        state = _make_state("hello")
-        llm = _mock_llm("nonexistent_plugin")
+    def test_no_profile_skips_identity_required_plugins(self):
+        """Without user_profile, plugins with requires_identity=True are skipped."""
         reg = _build_registry()
+        state = _make_state("test", user_profile=None)  # No profile
+        acc_upd, acc_parts, acc_tc = {}, [], []
 
-        intent = await classify_intent(state, reg, llm)
-        assert intent == "chat"
+        tools = make_delegate_tools(
+            reg, state, {}, acc_upd, acc_parts, acc_tc,
+        )
+        # All plugins require identity except identity itself (which is excluded)
+        assert len(tools) == 0
 
-    async def test_identity_gate_no_profile(self):
-        """User has no profile and target plugin requires identity → force identity."""
-        state = _make_state("排座", user_profile=None)
-        llm = _mock_llm("seating")  # LLM says seating, but user is unknown
+    def test_tool_description_includes_plugin_description(self):
+        """Each delegate tool's description references the plugin."""
         reg = _build_registry()
+        state = _make_state("test", user_profile={"name": "张三"})
+        acc_upd, acc_parts, acc_tc = {}, [], []
 
-        intent = await classify_intent(state, reg, llm)
-        assert intent == "identity"
+        tools = make_delegate_tools(
+            reg, state, {}, acc_upd, acc_parts, acc_tc,
+        )
+        seating_tool = next(
+            t for t in tools if t.name == "delegate_to_seating"
+        )
+        assert "seating" in seating_tool.description
 
-    async def test_identity_gate_with_profile(self):
-        """User HAS a profile → no identity redirect."""
+    async def test_delegate_tool_calls_plugin_handle(self):
+        """Calling a delegate tool actually invokes plugin.handle()."""
+        reg = _build_registry()
         state = _make_state("排座", user_profile={"name": "张三"})
-        llm = _mock_llm("seating")
-        reg = _build_registry()
+        acc_upd: dict = {}
+        acc_parts: list = []
+        acc_tc: list = []
 
-        intent = await classify_intent(state, reg, llm)
-        assert intent == "seating"
+        tools = make_delegate_tools(
+            reg, state, {}, acc_upd, acc_parts, acc_tc,
+        )
+        seating_tool = next(
+            t for t in tools if t.name == "delegate_to_seating"
+        )
+        result = await seating_tool.ainvoke({"user_request": "帮我排座"})
+        assert "Handled by seating" in result
 
-    async def test_identity_plugin_no_gate(self):
-        """Identity plugin itself doesn't trigger identity gate."""
-        state = _make_state("我是张三", user_profile=None)
-        llm = _mock_llm("identity")
-        reg = _build_registry()
+    async def test_delegate_captures_event_id_side_effect(self):
+        """State side-effects from plugin.handle() are captured."""
+        reg = PluginRegistry()
+        p = DummyPlugin("organizer", ["创建"])
+        # Override handle to return event_id
+        async def _handle_with_event(state):
+            return {
+                "turn_output": "创建成功",
+                "event_id": "evt-123",
+            }
+        p.handle = _handle_with_event  # type: ignore[assignment]
+        reg.register(p)
 
-        intent = await classify_intent(state, reg, llm)
-        assert intent == "identity"
+        state = _make_state("创建活动", user_profile={"name": "张三"})
+        acc_upd: dict = {}
+        acc_parts: list = []
+        acc_tc: list = []
 
-    async def test_chat_fallback(self):
-        """General conversation → chat."""
-        state = _make_state("今天天气怎么样")
-        llm = _mock_llm("chat")
-        reg = _build_registry()
+        tools = make_delegate_tools(
+            reg, state, {}, acc_upd, acc_parts, acc_tc,
+        )
+        tool = tools[0]
+        await tool.ainvoke({"user_request": "创建活动"})
+        assert acc_upd["event_id"] == "evt-123"
+        assert acc_upd["current_plugin"] == "organizer"
 
-        intent = await classify_intent(state, reg, llm)
-        assert intent == "chat"
 
+# ── Tests: Plugin Registry (unchanged) ──────────────────────
 
 class TestPluginRegistry:
     """Tests for registry itself."""

@@ -5,7 +5,7 @@
  *   1. LLM 模型配置 — model names, API keys per tier
  *   2. Agent 插件配置 — prompts, model tier, enabled per plugin
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -14,7 +14,7 @@ import {
   Key, Eye, EyeOff, Server,
 } from 'lucide-react';
 import { apiClient } from '../lib/api';
-import type { AgentConfig, AgentConfigDetail, LLMProviderInfo } from '../lib/api';
+import type { AgentConfig, AgentConfigDetail, LLMProviderInfo, ModelInfo, AvailableProvider } from '../lib/api';
 
 const TIER_META: Record<string, {
   label: string; icon: typeof Zap; color: string; bg: string;
@@ -70,6 +70,173 @@ function TierSelect({ value, onChange, label }: {
   );
 }
 
+// ── Model selector with grouped dropdown ─────────────────────
+
+const PROVIDER_LABELS: Record<string, string> = {
+  deepseek: 'DeepSeek',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+};
+
+function ModelSelect({ value, onChange, provider, models }: {
+  value: string;
+  onChange: (v: string) => void;
+  provider: string;
+  models: ModelInfo[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on click outside
+  useEffect(() => {
+    const handle = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, []);
+
+  // Filter models: show current provider first, then others
+  const q = search.toLowerCase();
+  const filtered = models.filter(
+    (m) =>
+      m.id.toLowerCase().includes(q) ||
+      m.name.toLowerCase().includes(q) ||
+      m.provider.toLowerCase().includes(q),
+  );
+
+  // Group: current provider on top, then others
+  const sameProvider = filtered.filter((m) => m.provider === provider);
+  const otherProviders = filtered.filter((m) => m.provider !== provider);
+
+  const currentModel = models.find((m) => m.id === value);
+
+  return (
+    <div ref={ref} className="relative">
+      <label className="block text-[10px] text-gray-500 mb-1">模型名称</label>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg bg-white hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-400 font-mono text-left"
+      >
+        <span className="truncate">
+          {currentModel ? (
+            <>{currentModel.name} <span className="text-gray-400 text-xs">({value})</span></>
+          ) : (
+            <span className={value ? '' : 'text-gray-400'}>{value || '选择模型...'}</span>
+          )}
+        </span>
+        <ChevronDown size={14} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-hidden">
+          {/* Search box */}
+          <div className="p-2 border-b border-gray-100">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="搜索模型..."
+              autoFocus
+              className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            />
+          </div>
+
+          <div className="overflow-y-auto max-h-56">
+            {/* Same provider group */}
+            {sameProvider.length > 0 && (
+              <>
+                <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase bg-gray-50 sticky top-0">
+                  {PROVIDER_LABELS[provider] || provider} — 当前供应商
+                </div>
+                {sameProvider.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => { onChange(m.id); setOpen(false); setSearch(''); }}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 flex items-center justify-between ${
+                      m.id === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700'
+                    }`}
+                  >
+                    <div>
+                      <span className="font-medium">{m.name}</span>
+                      <span className="ml-2 text-xs text-gray-400 font-mono">{m.id}</span>
+                    </div>
+                    <span className="text-[10px] text-gray-400 flex-shrink-0">{m.context}</span>
+                  </button>
+                ))}
+              </>
+            )}
+
+            {/* Other providers */}
+            {otherProviders.length > 0 && (
+              <>
+                <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase bg-gray-50 sticky top-0">
+                  其他供应商
+                </div>
+                {otherProviders.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => { onChange(m.id); setOpen(false); setSearch(''); }}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 flex items-center justify-between ${
+                      m.id === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700'
+                    }`}
+                  >
+                    <div>
+                      <span className="font-medium">{m.name}</span>
+                      <span className="ml-2 text-xs text-gray-400 font-mono">{m.id}</span>
+                      <span className="ml-1.5 text-[10px] px-1 py-0.5 bg-gray-100 text-gray-500 rounded">
+                        {PROVIDER_LABELS[m.provider] || m.provider}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-gray-400 flex-shrink-0">{m.context}</span>
+                  </button>
+                ))}
+              </>
+            )}
+
+            {filtered.length === 0 && (
+              <div className="px-3 py-4 text-sm text-gray-400 text-center">
+                无匹配模型
+                <div className="mt-1 text-[10px]">可直接在上方输入自定义模型ID</div>
+              </div>
+            )}
+          </div>
+
+          {/* Custom input fallback */}
+          <div className="border-t border-gray-100 p-2">
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="或手动输入模型ID..."
+                className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 font-mono"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && search.trim()) {
+                    onChange(search.trim());
+                    setOpen(false);
+                    setSearch('');
+                  }
+                }}
+              />
+              {search.trim() && (
+                <button
+                  onClick={() => { onChange(search.trim()); setOpen(false); setSearch(''); }}
+                  className="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                >
+                  确定
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── LLM Provider Section ──────────────────────────────────────
 
 function LLMProviderSection() {
@@ -78,8 +245,18 @@ function LLMProviderSection() {
     queryKey: ['llm-providers'],
     queryFn: () => apiClient.getLLMProviders(),
   });
+  const { data: availableProviders } = useQuery({
+    queryKey: ['available-providers'],
+    queryFn: () => apiClient.getAvailableProviders(),
+  });
+  const { data: modelsData } = useQuery({
+    queryKey: ['available-models'],
+    queryFn: () => apiClient.getAvailableModels(),
+    staleTime: 600_000, // 10 min
+  });
+  const allModels: ModelInfo[] = (modelsData as Record<string, ModelInfo[]>)?.all || [];
 
-  const [edits, setEdits] = useState<Record<string, { model: string; api_key: string; base_url: string }>>({});
+  const [edits, setEdits] = useState<Record<string, { provider: string; model: string; api_key: string; base_url: string }>>({});
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
@@ -89,13 +266,30 @@ function LLMProviderSection() {
     if (providers && Object.keys(edits).length === 0) {
       const init: typeof edits = {};
       for (const [tier, info] of Object.entries(providers as Record<string, LLMProviderInfo>)) {
-        init[tier] = { model: info.model, api_key: '', base_url: info.base_url };
+        init[tier] = { provider: info.provider, model: info.model, api_key: '', base_url: info.base_url };
       }
       setEdits(init);
     }
   }, [providers]);
 
   if (isLoading || !providers) return <div className="text-gray-400 text-sm py-4">加载中...</div>;
+
+  const handleProviderSwitch = (tier: string, newProvider: string) => {
+    const prov = (availableProviders || []).find((p: AvailableProvider) => p.provider === newProvider);
+    // Pick the first model for this provider from catalog
+    const provModels = allModels.filter(m => m.provider === newProvider);
+    const defaultModel = prov?.model || provModels[0]?.id || '';
+    setEdits(prev => ({
+      ...prev,
+      [tier]: {
+        ...prev[tier],
+        provider: newProvider,
+        model: defaultModel,
+        base_url: prov?.base_url || '',
+        api_key: '',
+      },
+    }));
+  };
 
   const handleSave = async (tier: string) => {
     const e = edits[tier];
@@ -105,6 +299,7 @@ function LLMProviderSection() {
     try {
       const patch: Record<string, string> = {};
       const orig = (providers as Record<string, LLMProviderInfo>)[tier];
+      if (e.provider !== orig.provider) patch.provider = e.provider;
       if (e.model !== orig.model) patch.model = e.model;
       if (e.api_key) patch.api_key = e.api_key;
       if (e.base_url !== orig.base_url) patch.base_url = e.base_url;
@@ -115,7 +310,6 @@ function LLMProviderSection() {
       }
       await apiClient.updateLLMProvider(tier, patch);
       queryClient.invalidateQueries({ queryKey: ['llm-providers'] });
-      // Clear the key field after save
       setEdits(prev => ({ ...prev, [tier]: { ...prev[tier], api_key: '' } }));
       setMsg(`${TIER_META[tier]?.label} 已保存`);
       setTimeout(() => setMsg(''), 2000);
@@ -134,6 +328,8 @@ function LLMProviderSection() {
     setMsg('已恢复默认');
     setTimeout(() => setMsg(''), 2000);
   };
+
+  const providerOptions = availableProviders || [];
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
@@ -156,7 +352,7 @@ function LLMProviderSection() {
           const info = (providers as Record<string, LLMProviderInfo>)[tier];
           const meta = TIER_META[tier];
           const Icon = meta.icon;
-          const e = edits[tier] || { model: info?.model || '', api_key: '', base_url: info?.base_url || '' };
+          const e = edits[tier] || { provider: info?.provider || '', model: info?.model || '', api_key: '', base_url: info?.base_url || '' };
           const keyVisible = showKeys[tier];
 
           return (
@@ -166,7 +362,6 @@ function LLMProviderSection() {
                 <div className="flex items-center gap-2">
                   <Icon size={16} className={meta.color} />
                   <span className="font-semibold text-sm">{meta.label}</span>
-                  <span className="text-[10px] text-gray-400 font-mono">{info?.provider}</span>
                 </div>
                 {info?.api_key_set ? (
                   <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-700 rounded">Key 已配置</span>
@@ -175,16 +370,38 @@ function LLMProviderSection() {
                 )}
               </div>
 
-              {/* Model name */}
+              {/* Provider selector */}
               <div>
-                <label className="block text-[10px] text-gray-500 mb-1">模型名称</label>
-                <input type="text" value={e.model}
-                  onChange={(ev) => setEdits(prev => ({
-                    ...prev, [tier]: { ...prev[tier], model: ev.target.value }
-                  }))}
-                  className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 font-mono"
-                />
+                <label className="block text-[10px] text-gray-500 mb-1">Provider</label>
+                <div className="flex gap-1 flex-wrap">
+                  {(providerOptions as AvailableProvider[]).map((p) => {
+                    const selected = e.provider === p.provider;
+                    return (
+                      <button key={p.provider} onClick={() => handleProviderSwitch(tier, p.provider)}
+                        className={`px-2 py-1 rounded-md text-[11px] font-medium transition-all ${
+                          selected
+                            ? 'bg-indigo-100 border border-indigo-400 text-indigo-700'
+                            : p.has_key
+                              ? 'bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100'
+                              : 'bg-gray-50 border border-dashed border-gray-200 text-gray-400'
+                        }`}>
+                        {p.label}
+                        {!p.has_key && <span className="ml-1 text-[9px]">(!)</span>}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
+
+              {/* Model name — dropdown selector */}
+              <ModelSelect
+                value={e.model}
+                onChange={(v) => setEdits(prev => ({
+                  ...prev, [tier]: { ...prev[tier], model: v }
+                }))}
+                provider={e.provider || info?.provider || 'openai'}
+                models={allModels}
+              />
 
               {/* API Key */}
               <div>
@@ -202,7 +419,7 @@ function LLMProviderSection() {
                       onChange={(ev) => setEdits(prev => ({
                         ...prev, [tier]: { ...prev[tier], api_key: ev.target.value }
                       }))}
-                      placeholder="输入新Key覆盖"
+                      placeholder="输入新Key覆盖（留空用.env默认）"
                       className="w-full px-2.5 py-1.5 pr-8 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 font-mono"
                     />
                     <button onClick={() => setShowKeys(prev => ({ ...prev, [tier]: !prev[tier] }))}
@@ -213,15 +430,15 @@ function LLMProviderSection() {
                 </div>
               </div>
 
-              {/* Base URL (only for fast/deepseek) */}
-              {(tier === 'fast' || e.base_url) && (
+              {/* Base URL — show for providers that need it */}
+              {(e.provider !== 'openai' && e.provider !== 'anthropic') && (
                 <div>
                   <label className="block text-[10px] text-gray-500 mb-1">Base URL</label>
                   <input type="text" value={e.base_url}
                     onChange={(ev) => setEdits(prev => ({
                       ...prev, [tier]: { ...prev[tier], base_url: ev.target.value }
                     }))}
-                    placeholder="https://api.deepseek.com/v1"
+                    placeholder="API Base URL"
                     className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 font-mono"
                   />
                 </div>

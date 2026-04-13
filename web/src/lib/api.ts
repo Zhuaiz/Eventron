@@ -59,6 +59,21 @@ export interface AgentConfigPatch {
   gen_model_tier?: string;
 }
 
+// ── Structured Message Parts (from agent) ──────────────────
+export interface MessagePart {
+  type: 'seat_map' | 'attendee_table' | 'event_card' | 'page_preview'
+    | 'confirmation' | 'file_link' | 'stats' | 'text';
+  [key: string]: any;
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  provider: string;
+  tier: string;
+  context: string;
+}
+
 export interface LLMProviderInfo {
   label: string;
   provider: string;
@@ -67,6 +82,14 @@ export interface LLMProviderInfo {
   api_key_set: boolean;
   base_url: string;
   has_override: boolean;
+}
+
+export interface AvailableProvider {
+  provider: string;
+  label: string;
+  model: string;
+  base_url: string;
+  has_key: boolean;
 }
 
 export interface LLMProviderPatch {
@@ -438,6 +461,8 @@ export class ApiClient {
       status: string;
       summary: string;
     }[] | null;
+    parts: MessagePart[] | null;
+    quick_replies: { label: string; value: string; style?: string }[] | null;
   }> {
     const formData = new FormData();
     formData.append('message', message);
@@ -592,6 +617,10 @@ export class ApiClient {
   }
 
   // LLM Providers
+  async getAvailableModels() {
+    return this.request<Record<string, ModelInfo[]>>('GET', '/v1/llm-providers/models');
+  }
+
   async getLLMProviders() {
     return this.request<Record<string, LLMProviderInfo>>('GET', '/v1/llm-providers');
   }
@@ -602,6 +631,10 @@ export class ApiClient {
 
   async resetLLMProviders() {
     return this.request<Record<string, LLMProviderInfo>>('POST', '/v1/llm-providers/reset');
+  }
+
+  async getAvailableProviders() {
+    return this.request<AvailableProvider[]>('GET', '/v1/llm-providers/available');
   }
 }
 

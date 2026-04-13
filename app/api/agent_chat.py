@@ -59,6 +59,20 @@ class ReflectionInfo(BaseModel):
     metrics: dict[str, Any] = {}
 
 
+class QuickReplyItem(BaseModel):
+    """A HITL quick-reply button for the frontend."""
+    label: str
+    value: str
+    style: str = "default"  # "primary" | "default" | "danger"
+
+
+class MessagePart(BaseModel):
+    """A structured UI card part for rich frontend rendering."""
+    type: str  # seat_map, attendee_table, event_card, page_preview, etc.
+    # Remaining fields vary by type — stored as extra kwargs
+    model_config = {"extra": "allow"}
+
+
 class ChatResponse(BaseModel):
     reply: str
     session_id: str
@@ -66,7 +80,9 @@ class ChatResponse(BaseModel):
     action_taken: str | None = None
     task_plan: list[dict] | None = None
     tool_calls: list[ToolCallInfo] | None = None
+    quick_replies: list[QuickReplyItem] | None = None
     reflection: ReflectionInfo | None = None
+    parts: list[dict] | None = None
 
 
 # ── Session store ──────────────────────────────────────────────
@@ -355,11 +371,14 @@ async def agent_chat(
         "event_id": session.get("event_id"),
         "pending_approval": None,
         "turn_output": None,
+        "plan_output": None,
         "attachments": session.get("attachments", []),
         "task_plan": session.get("task_plan", []),
         "event_draft": session.get("event_draft"),
         "scope": scope,
+        "parts": [],
         "tool_calls": [],
+        "quick_replies": [],
         "reflection": None,
     }
 
@@ -416,6 +435,18 @@ async def agent_chat(
         for tc in raw_tool_calls
     ] or None
 
+    # Build quick replies from graph result
+    raw_qr = result.get("quick_replies") or []
+    quick_replies_out = [
+        QuickReplyItem(
+            label=qr.get("label", ""),
+            value=qr.get("value", qr.get("label", "")),
+            style=qr.get("style", "default"),
+        )
+        for qr in raw_qr
+        if qr.get("label")
+    ] or None
+
     # Extract reflection data
     reflection_data = result.get("reflection")
     reflection_out = None
@@ -428,6 +459,10 @@ async def agent_chat(
             metrics=reflection_data.get("metrics", {}),
         )
 
+    # Extract structured parts
+    raw_parts = result.get("parts") or []
+    parts_out = raw_parts if raw_parts else None
+
     return ChatResponse(
         reply=reply_text,
         session_id=sid,
@@ -435,7 +470,9 @@ async def agent_chat(
         action_taken=action_taken,
         task_plan=task_plan,
         tool_calls=tool_calls_out,
+        quick_replies=quick_replies_out,
         reflection=reflection_out,
+        parts=parts_out,
     )
 
 
@@ -508,11 +545,14 @@ async def agent_chat_stream(
         "event_id": session.get("event_id"),
         "pending_approval": None,
         "turn_output": None,
+        "plan_output": None,
         "attachments": session.get("attachments", []),
         "task_plan": session.get("task_plan", []),
         "event_draft": session.get("event_draft"),
         "scope": scope,
+        "parts": [],
         "tool_calls": [],
+        "quick_replies": [],
         "reflection": None,
     }
 
@@ -575,7 +615,20 @@ async def agent_chat_stream(
                 for tc in raw_tc
             ]
 
+            # Build quick replies
+            raw_qr = result.get("quick_replies") or []
+            qr_out = [
+                {
+                    "label": qr.get("label", ""),
+                    "value": qr.get("value", qr.get("label", "")),
+                    "style": qr.get("style", "default"),
+                }
+                for qr in raw_qr
+                if qr.get("label")
+            ] or None
+
             reflection_data = result.get("reflection")
+            raw_parts = result.get("parts") or []
             done_data = {
                 "event": "done",
                 "reply": reply_text,
@@ -583,7 +636,9 @@ async def agent_chat_stream(
                 "event_id": session.get("event_id"),
                 "action_taken": _detect_action(reply_text),
                 "tool_calls": tc_out or None,
+                "quick_replies": qr_out,
                 "reflection": reflection_data,
+                "parts": raw_parts or None,
             }
             yield f"data: {_json.dumps(done_data, ensure_ascii=False)}\n\n"
 
@@ -653,10 +708,13 @@ async def agent_chat_text(
         "event_id": session.get("event_id"),
         "pending_approval": None,
         "turn_output": None,
+        "plan_output": None,
         "attachments": [],
         "task_plan": session.get("task_plan", []),
         "event_draft": session.get("event_draft"),
+        "parts": [],
         "tool_calls": [],
+        "quick_replies": [],
         "reflection": None,
     }
 
@@ -698,6 +756,19 @@ async def agent_chat_text(
         for tc in raw_tc
     ] or None
 
+    raw_qr = result.get("quick_replies") or []
+    qr_out = [
+        QuickReplyItem(
+            label=qr.get("label", ""),
+            value=qr.get("value", qr.get("label", "")),
+            style=qr.get("style", "default"),
+        )
+        for qr in raw_qr
+        if qr.get("label")
+    ] or None
+
+    raw_parts = result.get("parts") or []
+
     return ChatResponse(
         reply=reply_text,
         session_id=sid,
@@ -705,6 +776,8 @@ async def agent_chat_text(
         action_taken=_detect_action(reply_text),
         task_plan=session.get("task_plan") or None,
         tool_calls=tc_out,
+        quick_replies=qr_out,
+        parts=raw_parts or None,
     )
 
 

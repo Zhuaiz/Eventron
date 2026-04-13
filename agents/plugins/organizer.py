@@ -6,6 +6,10 @@ venue capacity, generate seats, and run auto-assignment.
 
 The LLM outputs ``action`` JSON blocks which this plugin extracts and
 executes against the real service layer.
+
+When a task_plan is present (from planner), the organizer operates in
+**one-shot mode**: it creates the event, generates the layout, and
+auto-assigns seats in a single turn — no extra confirmation needed.
 """
 
 from __future__ import annotations
@@ -44,12 +48,14 @@ ORGANIZER_SYSTEM = """你是 Eventron 会场智能排座助手。你帮助用户
 - 如果用户给了模糊信息，主动澄清
 - **不要反复确认**。当必需信息都收集完了，直接用 create_event 创建，不用再问"确认吗"。用户说"创建"/"是"/"好"就代表确认。
 - 日期处理：用户说"明天"就算成明天的 ISO 日期，说"下周五"就算出来。**必须输出 YYYY-MM-DD 格式**。
+- **主动建议合理参数**。如果用户说"正方形布局"但有128人，直接建议12×12=144座（能容纳128人），不要让用户自己算。
 
 ## 座位计算规则
 - "会场WxH米"：rows = floor(H / 行距), cols = floor(W / 列距)。默认行距0.9m，列距0.6m
 - "座位面积X平米"：宽=sqrt(面积*2/3), 深=sqrt(面积*3/2)，然后用这个宽深代替默认列距行距
 - 会场总面积推行列：先推算会场宽高（假设比例2:3或正方形），再算行列
 - **必须展示计算过程**
+- **人数推正方形**: rows=cols=ceil(sqrt(人数)), 确保总数≥人数
 
 ## 创建活动必需信息
 name, layout_type, venue_rows, venue_cols（必需）
@@ -117,6 +123,9 @@ class OrganizerPlugin(AgentPlugin):
     - Calculate venue capacity from dimensions
     - Handle mid-flow corrections
     - Output action blocks that get executed
+
+    When task_plan is present, enters one-shot mode:
+    create event → generate layout → auto-assign, all in one turn.
     """
 
     def __init__(self, services: dict[str, Any] | None = None):
@@ -157,14 +166,24 @@ class OrganizerPlugin(AgentPlugin):
         return "smart"
 
     async def handle(self, state: AgentState) -> dict[str, Any]:
-        """Full LLM-driven organizer conversation."""
+        """Full LLM-driven organizer conversation.
+
+        If task_plan is present with event_draft, uses one-shot mode
+        to execute create + layout + assign without further prompting.
+        """
         event_id = state.get("event_id")
-        # Use event_id as draft key, or "new"
+        task_plan = state.get("task_plan") or []
+        event_draft = state.get("event_draft")
+
+        # ── One-shot mode: plan confirmed, execute everything ──
+        if event_draft and task_plan and not event_id:
+            return await self._one_shot_execute(state, event_draft, task_plan)
+
+        # ── Normal LLM conversation mode ──
         draft_key = event_id or "new"
         draft = self._drafts.setdefault(draft_key, {})
 
         # Pre-populate draft from planner's event_draft if present
-        event_draft = state.get("event_draft")
         if event_draft and not draft:
             for k, v in event_draft.items():
                 if v is not None:
@@ -256,6 +275,115 @@ class OrganizerPlugin(AgentPlugin):
 
         return result
 
+    # ── One-shot execution mode ──────────────────────────────────
+    async def _one_shot_execute(
+        self,
+        state: AgentState,
+        event_draft: dict,
+        task_plan: list[dict],
+    ) -> dict[str, Any]:
+        """Execute full plan in one shot: create + layout + assign.
+
+        Skips LLM conversation entirely — all info is already known
+        from the planner's analysis.
+        """
+        parts: list[str] = []
+
+        # ── Step 1: Create event ──
+        name = event_draft.get("name", "未命名活动")
+        event_date = _parse_date(event_draft.get("date"))
+        location = event_draft.get("location")
+        layout_type = event_draft.get("layout_type", "theater")
+
+        # Calculate rows/cols from draft or estimate
+        rows = event_draft.get("estimated_rows") or event_draft.get("venue_rows")
+        cols = event_draft.get("estimated_cols") or event_draft.get("venue_cols")
+        estimated = event_draft.get("estimated_attendees")
+
+        # If no rows/cols but have estimated attendees, calculate
+        if (not rows or not cols) and estimated:
+            side = math.ceil(math.sqrt(estimated))
+            rows = side
+            cols = side
+
+        if not rows or not cols:
+            rows = rows or 10
+            cols = cols or 10
+
+        svc = self.event_svc
+        if not svc:
+            reply = "❌ EventService 不可用。"
+            return {
+                "messages": [AIMessage(content=reply)],
+                "turn_output": reply,
+            }
+
+        try:
+            event = await svc.create_event(
+                name=name,
+                event_date=event_date,
+                location=location,
+                layout_type=layout_type,
+                venue_rows=rows,
+                venue_cols=cols,
+            )
+            eid = str(event.id)
+            total_seats = event.venue_rows * event.venue_cols
+            parts.append(
+                f"✅ 活动「{event.name}」已创建！"
+                f"\n📍 {location or '未设置'}"
+                f" · 📅 {event.event_date or '未设置'}"
+                f"\n🪑 布局: {layout_type}，{rows}排×{cols}列 = {total_seats}座"
+            )
+        except Exception as e:
+            reply = f"❌ 创建活动失败：{e}"
+            return {
+                "messages": [AIMessage(content=reply)],
+                "turn_output": reply,
+            }
+
+        # ── Step 2: Generate layout ──
+        seat_svc = self.seat_svc
+        if seat_svc:
+            try:
+                seats = await seat_svc.create_venue_layout(
+                    uuid.UUID(eid), layout_type, rows, cols,
+                )
+                parts.append(
+                    f"✅ 已生成 {len(seats)} 个{layout_type}布局座位"
+                )
+            except Exception as e:
+                parts.append(f"⚠️ 座位生成出错：{e}")
+
+        # Mark organizer tasks as done in task_plan
+        updated_plan = []
+        for t in task_plan:
+            t2 = dict(t)
+            if t2.get("plugin") == "organizer":
+                t2["status"] = "done"
+            updated_plan.append(t2)
+
+        reply = "\n".join(parts)
+
+        # Build quick replies based on remaining tasks
+        pending = [t for t in updated_plan if t.get("status") == "pending"]
+        if pending:
+            qr = [{"label": "继续下一步", "value": "继续", "style": "primary"}]
+        else:
+            qr = [
+                {"label": "📋 查看座位图", "value": "查看座位图", "style": "primary"},
+                {"label": "🏷️ 设计铭牌", "value": "设计铭牌", "style": "default"},
+            ]
+
+        result: dict[str, Any] = {
+            "messages": [AIMessage(content=reply)],
+            "turn_output": reply,
+            "event_id": eid,
+            "task_plan": updated_plan,
+            "quick_replies": qr,
+        }
+        return result
+
     # ── State context builder ──────────────────────────────────
     def _build_state_context(
         self, event_id: str | None, draft: dict
@@ -303,8 +431,7 @@ class OrganizerPlugin(AgentPlugin):
             return (
                 f"\n\n✅ 活动「{event.name}」已创建！"
                 f"\n布局: {event.layout_type}，{rows}排×{cols}列"
-                f" = {rows * cols}座"
-                f"\n\n接下来要生成座位网格吗？",
+                f" = {rows * cols}座",
                 "event_created",
                 eid,
             )
@@ -330,8 +457,12 @@ class OrganizerPlugin(AgentPlugin):
                     "无需重复生成。",
                     None,
                 )
-            seats = await seat_svc.create_venue_grid(
-                uuid.UUID(eid), event.venue_rows, event.venue_cols
+            # Use proper layout generator, not legacy grid
+            seats = await seat_svc.create_venue_layout(
+                uuid.UUID(eid),
+                event.layout_type or "theater",
+                event.venue_rows,
+                event.venue_cols,
             )
             return (
                 f"\n\n✅ 已生成 {len(seats)} 个座位！"

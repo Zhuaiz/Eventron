@@ -214,8 +214,9 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
   });
 
   // ── mutations ──
-  // Ref to centerView so mutation callback can call latest version
+  // Refs so mutation callbacks can call latest version
   const centerViewRef = useRef<() => void>(() => {});
+  const fitAllRef = useRef<() => void>(() => {});
 
   const createLayoutMutation = useMutation({
     mutationFn: () =>
@@ -236,8 +237,8 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
       queryClient.invalidateQueries({ queryKey: ['event', eventId] });
       queryClient.invalidateQueries({ queryKey: ['dashboard', eventId] });
       queryClient.invalidateQueries({ queryKey: ['areas', eventId] });
-      // Reset to 100% zoom, centered on content
-      setTimeout(() => centerViewRef.current(), 100);
+      // Auto-fit: scale zoom so all seats visible (better for large layouts)
+      setTimeout(() => fitAllRef.current(), 100);
     },
   });
 
@@ -934,6 +935,7 @@ export function SeatingTab({ eventId, event }: SeatingTabProps) {
   }, [bounds, setZoom, setPan]);
 
   useEffect(() => { centerViewRef.current = centerView; }, [centerView]);
+  useEffect(() => { fitAllRef.current = fitAll; }, [fitAll]);
 
   // ── Selected seat detail panel with assign/unassign + zone picker ──
   const renderSeatDetail = () => {

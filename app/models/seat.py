@@ -57,5 +57,8 @@ class Seat(Base, UUIDMixin):
     attendee: Mapped[Optional[Attendee]] = relationship(back_populates="seat")
 
     __table_args__ = (
-        UniqueConstraint("event_id", "row_num", "col_num", name="uq_seat_position"),
+        UniqueConstraint(
+            "event_id", "area_id", "row_num", "col_num",
+            name="uq_seat_position_area",
+        ),
     )

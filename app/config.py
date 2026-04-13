@@ -48,6 +48,16 @@ class Settings(BaseSettings):
     # Anthropic Max (max tier — highest capability, e.g. page generation)
     anthropic_max_model: str = "claude-opus-4-6"
 
+    # GLM / 智谱 (OpenAI-compatible)
+    glm_api_key: str = ""
+    glm_model: str = "glm-4-flash"
+    glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4/"
+
+    # Qwen / 通义千问 (DashScope OpenAI-compatible)
+    qwen_api_key: str = ""
+    qwen_model: str = "qwen-plus"
+    qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
     # ── WeChat Work ──────────────────────────────────────────────
     wecom_corp_id: str = ""
     wecom_bot_secret: str = ""

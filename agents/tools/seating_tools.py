@@ -430,6 +430,264 @@ def make_seating_tools(
         await seat_svc.unassign_seat(current.id)
         return f"已取消 {name} 的座位 {current.label}"
 
+    # ── Structured seat-chart import ─────────────────────────
+    @tool
+    async def analyze_seat_chart() -> str:
+        """分析本活动上传的座位表 Excel，提取结构化信息。
+
+        自动识别：
+        - 每个 sheet = 一个区域（观众席、贵宾区…）
+        - 单元格中的人名 = 参会者（保留位置信息）
+        - 行/列标题、舞台、通道等装饰元素自动过滤
+        - 角色从 sheet 名称推断（观众席→观众，贵宾区→贵宾）
+        - 繁简中文自动统一为简体
+
+        返回结构化 JSON 摘要。后续可用 import_from_seat_chart 一键导入。
+        """
+        from tools.event_files import find_latest_file_by_type
+        from tools.excel_io import parse_seat_layout_structured
+
+        entry = find_latest_file_by_type(event_id, "excel")
+        if not entry:
+            return "本活动没有上传过 Excel 文件"
+
+        result = parse_seat_layout_structured(file_path=entry["path"])
+        parts = [f"📊 座位表分析结果 (文件: {entry.get('filename', 'Excel')})"]
+        parts.append(
+            f"总计 {result['total_attendees']} 位参会者, "
+            f"约 {result['total_seats']} 个座位"
+        )
+
+        for area in result["areas"]:
+            aisle_info = ""
+            if area.get("has_aisle") and area.get("aisle_after_col"):
+                aisle_info = f", 通道在第{area['aisle_after_col']}列后"
+            stage_info = ""
+            if area.get("has_stage"):
+                pos = "前方" if area["stage_position"] == "top" else "后方"
+                stage_info = f", 舞台在{pos}"
+            parts.append(
+                f"\n📍 {area['name']} ({area['role']}): "
+                f"{area['rows']}排×{area['cols']}列, "
+                f"{len(area['attendees'])}人"
+                f"{aisle_info}{stage_info}"
+            )
+
+        if result["dedup_warnings"]:
+            parts.append(
+                f"\n⚠️ 重复出现: {len(result['dedup_warnings'])} 人"
+                f"（同一人出现在多个区域，导入时会去重）"
+            )
+
+        parts.append(
+            "\n💡 使用 import_from_seat_chart 可按此结构一键创建区域"
+            "、导入参会者、生成布局并自动排座。"
+        )
+        return "\n".join(parts)
+
+    @tool
+    async def import_from_seat_chart(
+        skip_areas: str = "",
+    ) -> str:
+        """根据座位表 Excel 一键完成：创建区域→导入参会者→生成布局→排座。
+
+        自动执行完整流程（原子操作，任何一步失败则全部回滚）：
+        1. 解析 Excel 中每个 sheet 为一个区域
+        2. 创建区域（含行列数、舞台、布局信息）
+        3. 导入所有参会者（角色从区域名推断，位置保留）
+        4. 为每个区域生成座位布局
+        5. 按 priority_first 策略自动排座
+
+        Args:
+            skip_areas: 要跳过的区域名（逗号分隔），如 "贵宾室"
+                        贵宾室常与贵宾区人员重叠，可选择跳过。
+                        留空 = 全部导入。
+        """
+        from tools.chinese_norm import normalize_role
+        from tools.event_files import find_latest_file_by_type
+        from tools.excel_io import parse_seat_layout_structured
+
+        entry = find_latest_file_by_type(event_id, "excel")
+        if not entry:
+            return "本活动没有上传过 Excel 文件"
+
+        result = parse_seat_layout_structured(file_path=entry["path"])
+        if not result["areas"]:
+            return "未能从 Excel 中识别出座位区域"
+
+        skip_set = {
+            s.strip()
+            for s in skip_areas.split(",")
+            if s.strip()
+        }
+
+        # ── Wrap entire import in a SAVEPOINT for atomicity ──
+        # If any step fails, the DB rolls back to before the import
+        # started — no orphaned areas or partial attendee imports.
+        try:
+            async with seat_svc.begin_nested():
+                report, total_created, total_updated, assigned_count = (
+                    await _do_import(
+                        result, skip_set, normalize_role,
+                    )
+                )
+        except Exception as exc:
+            return (
+                f"❌ 导入失败，已回滚所有操作。\n"
+                f"错误: {exc!s}\n"
+                f"请检查 Excel 文件格式后重试。"
+            )
+
+        all_attendees = (
+            await attendee_svc.list_attendees_for_event(eid)
+        )
+        seated_ids = set()
+        for s in await seat_svc.get_seats(eid):
+            if s.attendee_id:
+                seated_ids.add(str(s.attendee_id))
+        unseated = [
+            a for a in all_attendees
+            if str(a.id) not in seated_ids
+            and a.status in ("confirmed", "pending")
+        ]
+
+        report.append(
+            f"\n📊 导入完成: "
+            f"{total_created} 新增, {total_updated} 更新, "
+            f"{assigned_count} 人已排座"
+        )
+        if unseated:
+            names = ", ".join(a.name for a in unseated[:10])
+            extra = (
+                f" 等共 {len(unseated)} 人"
+                if len(unseated) > 10 else ""
+            )
+            report.append(
+                f"⚠️ {len(unseated)} 人未分配座位（座位不足）: "
+                f"{names}{extra}"
+            )
+
+        return "\n".join(report)
+
+    async def _do_import(
+        parse_result: dict,
+        skip_set: set[str],
+        normalize_role,
+    ) -> tuple[list[str], int, int, int]:
+        """Inner import logic — runs inside a SAVEPOINT."""
+        report: list[str] = ["🚀 开始导入座位表..."]
+        imported_names: set[str] = set()
+        total_created = 0
+        total_updated = 0
+
+        # Delete existing areas to start fresh
+        existing_areas = await seat_svc.list_areas(eid)
+        for ea in existing_areas:
+            await seat_svc.delete_area(ea.id)
+        if existing_areas:
+            report.append(
+                f"  已清除 {len(existing_areas)} 个旧区域"
+            )
+
+        y_cursor = 0.0
+        area_spacing = 80.0
+
+        for area_data in parse_result["areas"]:
+            area_name = area_data["name"]
+            if area_name in skip_set:
+                report.append(f"  ⏭️ 跳过区域: {area_name}")
+                continue
+
+            rows = area_data["rows"]
+            cols = area_data["cols"]
+            role = area_data["role"]
+            has_stage = area_data.get("has_stage", False)
+
+            area = await seat_svc.create_area(
+                eid,
+                name=area_name,
+                layout_type="theater" if rows > 2 else "grid",
+                rows=rows,
+                cols=cols,
+                display_order=len(
+                    await seat_svc.list_areas(eid),
+                ),
+                offset_x=0.0,
+                offset_y=y_cursor,
+                stage_label="舞台" if has_stage else None,
+            )
+            report.append(
+                f"  ✅ 区域 {area_name}: {rows}排×{cols}列"
+            )
+
+            seats = await seat_svc.generate_area_layout(
+                eid, area.id,
+            )
+            report.append(f"     → 生成 {len(seats)} 个座位")
+
+            all_seats = await seat_svc.get_seats(eid)
+            area_seat_ids = [
+                s.id for s in all_seats if s.area_id == area.id
+            ]
+            if area_seat_ids:
+                await seat_svc.bulk_update_zone(
+                    area_seat_ids, area_name,
+                )
+
+            # Import attendees
+            area_created = 0
+            area_updated = 0
+            existing_attendees = (
+                await attendee_svc.list_attendees_for_event(eid)
+            )
+            existing_map = {
+                a.name: a for a in existing_attendees
+            }
+            base_priority = 80 if "贵宾" in role else (
+                60 if "嘉宾" in role else 30
+            )
+
+            for att_data in area_data["attendees"]:
+                name = att_data["name"]
+                if name in imported_names:
+                    continue
+                imported_names.add(name)
+
+                norm_role = normalize_role(role)
+                fields = {
+                    "role": norm_role,
+                    "priority": base_priority,
+                }
+
+                if name in existing_map:
+                    await attendee_svc.update_attendee(
+                        existing_map[name].id, **fields,
+                    )
+                    area_updated += 1
+                else:
+                    await attendee_svc.create_attendee(
+                        eid, name=name, **fields,
+                    )
+                    area_created += 1
+
+            total_created += area_created
+            total_updated += area_updated
+            if area_created or area_updated:
+                report.append(
+                    f"     → 参会者: 新增 {area_created}, "
+                    f"更新 {area_updated}"
+                )
+
+            y_cursor += rows * 46.0 + area_spacing
+
+        # Auto-assign
+        assignments = await seat_svc.auto_assign(
+            eid, strategy="by_zone",
+        )
+        assigned_count = len(assignments) if assignments else 0
+
+        return report, total_created, total_updated, assigned_count
+
     # ── Area (venue zone) management tools ────────────────────
     @tool
     async def list_areas() -> str:
@@ -533,6 +791,8 @@ def make_seating_tools(
         set_zone,
         set_zone_unzoned,
         read_event_excel,
+        analyze_seat_chart,
+        import_from_seat_chart,
         list_attendees,
         import_attendees,
         list_attendees_with_seats,

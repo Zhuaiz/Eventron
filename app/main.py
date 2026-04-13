@@ -1,12 +1,17 @@
 """FastAPI application factory."""
 
+import pathlib
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
+
+# Vite build output directory
+_WEB_DIST = pathlib.Path(__file__).resolve().parent.parent / "web" / "dist"
 
 
 @asynccontextmanager
@@ -86,6 +91,20 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health() -> dict:
         return {"status": "ok"}
+
+    # ── Serve frontend static files (production) ─────────────
+    if _WEB_DIST.is_dir():
+        from fastapi.responses import FileResponse
+
+        app.mount("/assets", StaticFiles(directory=_WEB_DIST / "assets"), name="static")
+
+        @app.get("/{full_path:path}")
+        async def serve_spa(full_path: str) -> FileResponse:
+            """Catch-all: serve index.html for SPA client-side routing."""
+            file = _WEB_DIST / full_path
+            if file.is_file():
+                return FileResponse(file)
+            return FileResponse(_WEB_DIST / "index.html")
 
     return app
 

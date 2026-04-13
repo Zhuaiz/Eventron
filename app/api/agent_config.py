@@ -87,6 +87,16 @@ class LLMProviderPatch(BaseModel):
     provider: str | None = Field(None, description="Provider name")
 
 
+@router.get("/llm-providers/models")
+async def available_models() -> dict[str, Any]:
+    """Return known models grouped by provider.
+
+    Frontend uses this to populate the model-name dropdown so users
+    don't have to memorize model ID strings.
+    """
+    return svc.get_available_models()
+
+
 @router.get("/llm-providers")
 async def list_llm_providers() -> dict[str, Any]:
     """List all LLM tier configurations (keys masked)."""
@@ -111,3 +121,10 @@ async def update_llm_provider(
 async def reset_llm_providers() -> dict[str, Any]:
     """Reset all LLM provider configs to .env defaults."""
     return await svc.reset_llm_providers()
+
+
+@router.get("/llm-providers/available")
+async def list_available_providers() -> list[dict[str, Any]]:
+    """List all known providers with their env-configured status."""
+    from app.llm_factory import list_available_providers
+    return list_available_providers()

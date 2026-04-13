@@ -205,7 +205,7 @@ _LLM_FILE = _CONFIG_DIR / "agent_config.json"
 
 
 def _llm_defaults() -> dict[str, dict[str, str]]:
-    """Return current .env-based LLM provider defaults."""
+    """Return current .env-based LLM provider defaults per tier."""
     from app.config import settings
     return {
         "fast": {
@@ -239,10 +239,45 @@ def _llm_defaults() -> dict[str, dict[str, str]]:
     }
 
 
+def _provider_env_defaults(provider: str) -> dict[str, str]:
+    """Return env-based defaults for a specific provider (model, key, url)."""
+    from app.config import settings
+    mapping: dict[str, dict[str, str]] = {
+        "deepseek": {
+            "model": settings.deepseek_model,
+            "api_key": settings.deepseek_api_key,
+            "base_url": settings.deepseek_base_url,
+        },
+        "openai": {
+            "model": settings.openai_model,
+            "api_key": settings.openai_api_key,
+            "base_url": "",
+        },
+        "anthropic": {
+            "model": settings.anthropic_model,
+            "api_key": settings.anthropic_api_key,
+            "base_url": "",
+        },
+        "glm": {
+            "model": settings.glm_model,
+            "api_key": settings.glm_api_key,
+            "base_url": settings.glm_base_url,
+        },
+        "qwen": {
+            "model": settings.qwen_model,
+            "api_key": settings.qwen_api_key,
+            "base_url": settings.qwen_base_url,
+        },
+    }
+    return mapping.get(provider, {})
+
+
 async def get_llm_providers() -> dict[str, dict[str, str]]:
     """Return LLM provider config for all tiers.
 
     Merges .env defaults with any JSON overrides.
+    When a provider is switched, auto-fills model/key/url from that
+    provider's env defaults (unless explicitly overridden).
     API keys are masked for display (last 6 chars visible).
     """
     defaults = _llm_defaults()
@@ -252,14 +287,28 @@ async def get_llm_providers() -> dict[str, dict[str, str]]:
     result: dict[str, dict[str, str]] = {}
     for tier, default in defaults.items():
         over = llm_over.get(tier, {})
-        key = over.get("api_key", default["api_key"])
+        provider = over.get("provider", default["provider"])
+
+        # If provider was switched, get that provider's env defaults
+        if provider != default["provider"]:
+            prov_env = _provider_env_defaults(provider)
+            model = over.get("model", prov_env.get("model", ""))
+            key = over.get("api_key", prov_env.get("api_key", ""))
+            base_url = over.get("base_url", prov_env.get("base_url", ""))
+        else:
+            model = over.get("model", default["model"])
+            key = over.get("api_key", default["api_key"])
+            base_url = over.get("base_url", default["base_url"])
+
         result[tier] = {
             "label": default["label"],
-            "provider": over.get("provider", default["provider"]),
-            "model": over.get("model", default["model"]),
+            "provider": provider,
+            "model": model,
             "api_key_masked": _mask_key(key),
-            "api_key_set": bool(key and key not in ("", "sk-xxx", "sk-ant-xxx")),
-            "base_url": over.get("base_url", default["base_url"]),
+            "api_key_set": bool(
+                key and key not in ("", "sk-xxx", "sk-ant-xxx", "xxx"),
+            ),
+            "base_url": base_url,
             "has_override": bool(over),
         }
     return result
@@ -323,46 +372,182 @@ def _mask_key(key: str) -> str:
 
 
 def _apply_llm_overrides() -> None:
-    """Apply LLM JSON overrides to the live settings singleton.
+    """Clear LLM cache so provider config changes take effect.
 
-    This lets runtime changes take effect without restart.
+    The provider-based factory reads overrides directly from
+    agent_config.json at creation time, so we only need to bust
+    the LRU cache here.
     """
-    from app.config import settings
-
-    overrides = _read_overrides()
-    llm_over = overrides.get("_llm_providers", {})
-
-    for tier, vals in llm_over.items():
-        if tier == "fast":
-            if "model" in vals:
-                settings.deepseek_model = vals["model"]
-            if "api_key" in vals:
-                settings.deepseek_api_key = vals["api_key"]
-            if "base_url" in vals:
-                settings.deepseek_base_url = vals["base_url"]
-        elif tier == "smart":
-            if "model" in vals:
-                settings.openai_model = vals["model"]
-            if "api_key" in vals:
-                settings.openai_api_key = vals["api_key"]
-        elif tier == "strong":
-            if "model" in vals:
-                settings.anthropic_model = vals["model"]
-            if "api_key" in vals:
-                settings.anthropic_api_key = vals["api_key"]
-        elif tier == "max":
-            if "model" in vals:
-                settings.anthropic_max_model = vals["model"]
-            # Max shares api_key with strong (anthropic)
-            if "api_key" in vals:
-                settings.anthropic_api_key = vals["api_key"]
-
-    # Clear LRU caches so new settings take effect
     try:
         from app.llm_factory import get_llm
         get_llm.cache_clear()
     except Exception:
         pass
+
+
+# ── Available models catalog ──────────────────────────────────
+# Curated list of models per provider. Shown in the UI as a dropdown
+# so users don't have to memorize model strings.
+
+KNOWN_MODELS: list[dict[str, str]] = [
+    # DeepSeek
+    {
+        "id": "deepseek-chat",
+        "name": "DeepSeek V3",
+        "provider": "deepseek",
+        "tier": "fast",
+        "context": "128K",
+    },
+    {
+        "id": "deepseek-reasoner",
+        "name": "DeepSeek R1",
+        "provider": "deepseek",
+        "tier": "smart",
+        "context": "128K",
+    },
+    # OpenAI
+    {
+        "id": "gpt-4o-mini",
+        "name": "GPT-4o Mini",
+        "provider": "openai",
+        "tier": "fast",
+        "context": "128K",
+    },
+    {
+        "id": "gpt-4o",
+        "name": "GPT-4o",
+        "provider": "openai",
+        "tier": "smart",
+        "context": "128K",
+    },
+    {
+        "id": "gpt-4.1",
+        "name": "GPT-4.1",
+        "provider": "openai",
+        "tier": "smart",
+        "context": "1M",
+    },
+    {
+        "id": "gpt-4.1-mini",
+        "name": "GPT-4.1 Mini",
+        "provider": "openai",
+        "tier": "fast",
+        "context": "1M",
+    },
+    {
+        "id": "gpt-4.1-nano",
+        "name": "GPT-4.1 Nano",
+        "provider": "openai",
+        "tier": "fast",
+        "context": "1M",
+    },
+    {
+        "id": "o3",
+        "name": "O3",
+        "provider": "openai",
+        "tier": "max",
+        "context": "200K",
+    },
+    {
+        "id": "o3-mini",
+        "name": "O3 Mini",
+        "provider": "openai",
+        "tier": "strong",
+        "context": "200K",
+    },
+    {
+        "id": "o4-mini",
+        "name": "O4 Mini",
+        "provider": "openai",
+        "tier": "strong",
+        "context": "200K",
+    },
+    # Anthropic
+    {
+        "id": "claude-sonnet-4-6",
+        "name": "Claude Sonnet 4.6",
+        "provider": "anthropic",
+        "tier": "strong",
+        "context": "200K",
+    },
+    {
+        "id": "claude-opus-4-6",
+        "name": "Claude Opus 4.6",
+        "provider": "anthropic",
+        "tier": "max",
+        "context": "200K",
+    },
+    {
+        "id": "claude-haiku-4-5-20251001",
+        "name": "Claude Haiku 4.5",
+        "provider": "anthropic",
+        "tier": "fast",
+        "context": "200K",
+    },
+    # GLM / 智谱
+    {
+        "id": "glm-4-flash",
+        "name": "GLM-4 Flash",
+        "provider": "glm",
+        "tier": "fast",
+        "context": "128K",
+    },
+    {
+        "id": "glm-4-plus",
+        "name": "GLM-4 Plus",
+        "provider": "glm",
+        "tier": "smart",
+        "context": "128K",
+    },
+    {
+        "id": "glm-4",
+        "name": "GLM-4",
+        "provider": "glm",
+        "tier": "smart",
+        "context": "128K",
+    },
+    # Qwen / 通义千问
+    {
+        "id": "qwen-turbo",
+        "name": "Qwen Turbo",
+        "provider": "qwen",
+        "tier": "fast",
+        "context": "128K",
+    },
+    {
+        "id": "qwen-plus",
+        "name": "Qwen Plus",
+        "provider": "qwen",
+        "tier": "smart",
+        "context": "128K",
+    },
+    {
+        "id": "qwen-max",
+        "name": "Qwen Max",
+        "provider": "qwen",
+        "tier": "strong",
+        "context": "32K",
+    },
+]
+
+
+def get_available_models() -> dict[str, list[dict[str, str]]]:
+    """Return known models grouped by provider.
+
+    Result format::
+
+        {
+          "deepseek": [{"id": "deepseek-chat", "name": "DeepSeek V3", ...}],
+          "openai":   [...],
+          "anthropic": [...],
+          "all": [...],   # flat list
+        }
+    """
+    by_provider: dict[str, list[dict[str, str]]] = {}
+    for m in KNOWN_MODELS:
+        by_provider.setdefault(m["provider"], []).append(m)
+    by_provider["all"] = KNOWN_MODELS
+    return by_provider
 
 
 # ── Helpers for plugins to read their current config ────────────

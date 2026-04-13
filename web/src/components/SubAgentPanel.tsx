@@ -11,7 +11,7 @@
  * - File upload support
  * - Collapsible sidebar layout
  */
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, DragEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Bot, Send, Paperclip, X, ChevronRight, ChevronLeft,
@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../lib/api';
 import { ChatMessage, parseChoices } from './ChatMessage';
-import type { ChatMessageData, ToolCallInfo } from './ChatMessage';
+import type { ChatMessageData, ToolCallInfo, QuickReplyData } from './ChatMessage';
 
 interface EventFileEntry {
   id: string;
@@ -53,14 +53,47 @@ export function SubAgentPanel({
   placeholder = '描述你的需求...（Shift+Enter 换行）',
   welcomeMessage,
 }: SubAgentPanelProps) {
+  // ── Persist chat per event+scope in sessionStorage ───────
+  const STORAGE_KEY = `eventron_sub_${eventId}_${scope}`;
+
+  const loadPersistedState = () => {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw) as {
+        messages: ChatMessageData[];
+        sessionId: string | null;
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const persisted = loadPersistedState();
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [messages, setMessages] = useState<ChatMessageData[]>([
-    { role: 'assistant', content: welcomeMessage },
-  ]);
+  const [messages, setMessages] = useState<ChatMessageData[]>(
+    persisted?.messages?.length
+      ? persisted.messages
+      : [{ role: 'assistant', content: welcomeMessage }],
+  );
   const [input, setInput] = useState('');
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(persisted?.sessionId ?? null);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+
+  // Save to sessionStorage on change
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+        messages,
+        sessionId,
+      }));
+    } catch {
+      // ignore
+    }
+  }, [messages, sessionId, STORAGE_KEY]);
   const [showFilePicker, setShowFilePicker] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounterRef = useRef(0);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingTools, setStreamingTools] = useState<StreamingToolCall[]>([]);
   const [thinkingStep, setThinkingStep] = useState(0);
@@ -133,6 +166,40 @@ export function SubAgentPanel({
     return () => ro.disconnect();
   }, [adjustHeight]);
 
+  const ACCEPTED_TYPES = ['image/', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel', 'text/csv', 'application/pdf'];
+  const isAcceptedFile = (file: File) =>
+    ACCEPTED_TYPES.some((t) => file.type.startsWith(t)) || /\.(xlsx?|csv|pdf)$/i.test(file.name);
+
+  const handleDragEnter = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (e.dataTransfer?.types.includes('Files')) setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) setIsDragging(false);
+  }, []);
+
+  const handleDragOver = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    dragCounterRef.current = 0;
+    const files = Array.from(e.dataTransfer?.files || []).filter(isAcceptedFile);
+    if (files.length > 0) {
+      setPendingFiles((prev) => [...prev, ...files]);
+    }
+  }, []);
+
   const handleClear = () => {
     setMessages([{ role: 'assistant', content: welcomeMessage }]);
     setSessionId(null);
@@ -140,6 +207,7 @@ export function SubAgentPanel({
     setInput('');
     setStreamingTools([]);
     setThinkingStep(0);
+    sessionStorage.removeItem(STORAGE_KEY);
     if (abortRef.current) abortRef.current.abort();
   };
 
@@ -200,15 +268,19 @@ export function SubAgentPanel({
 
           case 'done': {
             setSessionId(evt.session_id || sessionId);
-            const choices = parseChoices(evt.reply || '');
+            const rawQr = (evt.quick_replies || []) as QuickReplyData[];
+            const choices = rawQr.length > 0 ? undefined : parseChoices(evt.reply || '') || undefined;
+            const rawParts = evt.parts || undefined;
             setMessages((prev) => [
               ...prev,
               {
                 role: 'assistant',
                 content: evt.reply || '',
                 toolCalls: evt.tool_calls as ToolCallInfo[] | undefined,
-                choices: choices.length > 0 ? choices : undefined,
+                quickReplies: rawQr.length > 0 ? rawQr : undefined,
+                choices: choices && choices.length > 0 ? choices : undefined,
                 reflection: evt.reflection || undefined,
+                parts: rawParts,
               },
             ]);
             // Refresh related data
@@ -235,14 +307,17 @@ export function SubAgentPanel({
           { eventId, sessionId: sessionId || undefined, scope, files },
         );
         setSessionId(data.session_id);
-        const choices = parseChoices(data.reply);
+        const dataQr = (data.quick_replies || []) as QuickReplyData[];
+        const choices = dataQr.length > 0 ? undefined : parseChoices(data.reply) || undefined;
         setMessages((prev) => [
           ...prev,
           {
             role: 'assistant',
             content: data.reply,
             toolCalls: data.tool_calls as ToolCallInfo[] | undefined,
-            choices: choices.length > 0 ? choices : undefined,
+            quickReplies: dataQr.length > 0 ? dataQr : undefined,
+            choices: choices && choices.length > 0 ? choices : undefined,
+            parts: data.parts || undefined,
           },
         ]);
         queryClient.invalidateQueries({ queryKey: ['seats', eventId] });
@@ -284,7 +359,21 @@ export function SubAgentPanel({
   }
 
   return (
-    <div className="w-80 border-l border-gray-200 bg-white flex flex-col flex-shrink-0">
+    <div
+      className="w-80 border-l border-gray-200 bg-white flex flex-col flex-shrink-0 relative"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* Drag overlay */}
+      {isDragging && (
+        <div className="absolute inset-0 z-50 bg-indigo-50/80 border-2 border-dashed border-indigo-400 rounded-lg flex flex-col items-center justify-center pointer-events-none">
+          <Upload size={28} className="text-indigo-500 mb-1" />
+          <p className="text-indigo-600 font-medium text-xs">松开即可上传</p>
+          <p className="text-indigo-400 text-[10px] mt-0.5">图片 / Excel / PDF</p>
+        </div>
+      )}
       {/* Header */}
       <div className="px-3 py-2 border-b border-gray-200 flex items-center justify-between bg-indigo-50">
         <div className="flex items-center gap-2">
@@ -453,16 +542,16 @@ export function SubAgentPanel({
             onPaste={(e) => {
               const items = e.clipboardData?.items;
               if (!items) return;
-              const imageFiles: File[] = [];
+              const pastedFiles: File[] = [];
               for (let i = 0; i < items.length; i++) {
-                if (items[i].type.startsWith('image/')) {
+                if (items[i].kind === 'file') {
                   const file = items[i].getAsFile();
-                  if (file) imageFiles.push(file);
+                  if (file) pastedFiles.push(file);
                 }
               }
-              if (imageFiles.length > 0) {
+              if (pastedFiles.length > 0) {
                 e.preventDefault();
-                setPendingFiles((p) => [...p, ...imageFiles]);
+                setPendingFiles((p) => [...p, ...pastedFiles]);
               }
             }}
             placeholder={placeholder}

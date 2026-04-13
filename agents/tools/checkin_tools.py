@@ -402,16 +402,21 @@ def make_checkin_tools(
             flags=re.IGNORECASE,
         )
 
-        # 6. Save
+        # 6. Save to STAGING (not live) — user must confirm before going live
         upload_dir = Path(f"uploads/events/{event_id}")
         upload_dir.mkdir(parents=True, exist_ok=True)
-        page_path = upload_dir / "checkin_page.html"
-        page_path.write_text(html, encoding="utf-8")
+        staging_path = upload_dir / "checkin_page_staging.html"
+        staging_path.write_text(html, encoding="utf-8")
 
         return json.dumps({
             "status": "ok",
-            "message": "自定义签到页已部署",
-            "url": f"/p/{event_id}/checkin",
+            "message": (
+                "签到页已生成到预览区（尚未上线）。"
+                "请在预览中确认效果，满意后调用 confirm_staged_page 正式部署。"
+                "如需重新生成，可再次调用本工具。"
+            ),
+            "preview_url": f"/p/{event_id}/checkin?preview=staging",
+            "next_step": "confirm_staged_page",
             "size_bytes": len(html.encode()),
         }, ensure_ascii=False)
 
@@ -434,6 +439,69 @@ def make_checkin_tools(
         return json.dumps({
             "preview_url": f"/p/{event_id}/checkin",
             "hint": "可在 iframe 或浏览器中打开此 URL 预览签到页",
+        }, ensure_ascii=False)
+
+    # ── Staging / deployment lifecycle ────────────────────────────
+
+    @tool
+    async def confirm_staged_page() -> str:
+        """将预览中的签到页正式部署上线。
+
+        会自动备份当前在线版本，部署后参会者扫码即可看到新页面。
+        如果效果不满意，可用 rollback_page 一键回退到上一版。
+        """
+        upload_dir = Path(f"uploads/events/{event_id}")
+        staging_path = upload_dir / "checkin_page_staging.html"
+        live_path = upload_dir / "checkin_page.html"
+        backup_path = upload_dir / "checkin_page_backup.html"
+
+        if not staging_path.exists():
+            return json.dumps({
+                "status": "error",
+                "message": "没有待部署的预览页面。请先用 deploy_custom_checkin_page 生成。",
+            }, ensure_ascii=False)
+
+        # Back up current live page (if exists)
+        if live_path.exists():
+            import shutil
+            shutil.copy2(str(live_path), str(backup_path))
+
+        # Promote staging → live
+        import shutil
+        shutil.move(str(staging_path), str(live_path))
+
+        return json.dumps({
+            "status": "ok",
+            "message": "签到页已正式上线！参会者扫码即可看到新页面。",
+            "url": f"/p/{event_id}/checkin",
+            "can_rollback": backup_path.exists(),
+        }, ensure_ascii=False)
+
+    @tool
+    async def rollback_page() -> str:
+        """回退签到页到上一个版本。
+
+        如果新部署的页面有问题，调用此工具恢复到之前的版本。
+        """
+        upload_dir = Path(f"uploads/events/{event_id}")
+        live_path = upload_dir / "checkin_page.html"
+        backup_path = upload_dir / "checkin_page_backup.html"
+
+        if not backup_path.exists():
+            return json.dumps({
+                "status": "error",
+                "message": "没有可回退的版本。",
+            }, ensure_ascii=False)
+
+        # Restore backup → live
+        import shutil
+        shutil.copy2(str(backup_path), str(live_path))
+        backup_path.unlink()
+
+        return json.dumps({
+            "status": "ok",
+            "message": "已回退到上一版签到页。",
+            "url": f"/p/{event_id}/checkin",
         }, ensure_ascii=False)
 
     # ── Incremental editing tools ────────────────────────────────
@@ -563,6 +631,8 @@ def make_checkin_tools(
         generate_checkin_qr,
         render_checkin_page,
         deploy_custom_checkin_page,
+        confirm_staged_page,
+        rollback_page,
         list_attendee_roles,
         preview_checkin_page,
         # Incremental editing tools

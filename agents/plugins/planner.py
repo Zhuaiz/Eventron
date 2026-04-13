@@ -229,25 +229,71 @@ class PlannerPlugin(AgentPlugin):
         attachments: list[dict],
         user_msg: str,
     ) -> dict[str, Any]:
-        """Use LLM to analyze Excel content and plan.
+        """Analyze Excel — detects seat-chart vs attendee-list automatically.
 
-        LLM-first: read raw text → LLM extracts meaning → structured plan.
+        Strategy:
+        1. Try structured seat-chart parser first (spatial layout with names)
+        2. If it finds areas with attendees → use that as primary analysis
+        3. Otherwise fall back to raw text for LLM analysis
         """
-        from tools.excel_io import read_excel_sheets_as_text
+        from tools.excel_io import (
+            parse_seat_layout_structured,
+            read_excel_sheets_as_text,
+        )
 
         excel_att = next(
             a for a in attachments if a.get("type") == "excel"
         )
         try:
-            excel_text = read_excel_sheets_as_text(
-                file_path=excel_att["path"]
+            # Try structured seat-chart parsing first
+            structured = parse_seat_layout_structured(
+                file_path=excel_att["path"],
             )
-            # Let the LLM analyze the raw Excel content directly
-            analysis = (
-                f"Excel 文件原始内容：\n{excel_text}"
+            is_seat_chart = (
+                len(structured.get("areas", [])) > 0
+                and structured.get("total_attendees", 0) >= 3
             )
+
+            if is_seat_chart:
+                # Build rich analysis from structured data
+                parts = [
+                    "Excel 座位表结构化分析结果：",
+                    f"总计 {structured['total_attendees']} 位参会者, "
+                    f"约 {structured['total_seats']} 个座位位置",
+                ]
+                for area in structured["areas"]:
+                    aisle = ""
+                    if area.get("has_aisle") and area.get("aisle_after_col"):
+                        aisle = (
+                            f", 通道在第{area['aisle_after_col']}列后"
+                        )
+                    parts.append(
+                        f"  区域: {area['name']} "
+                        f"({area['role']}) — "
+                        f"{area['rows']}排×{area['cols']}列, "
+                        f"{len(area['attendees'])}人{aisle}"
+                    )
+                if structured["dedup_warnings"]:
+                    parts.append(
+                        f"  注意: {len(structured['dedup_warnings'])} "
+                        f"人在多个区域重复出现"
+                    )
+                parts.append(
+                    "\n这是一个带有空间位置信息的座位表。"
+                    "seating 插件可使用 analyze_seat_chart + "
+                    "import_from_seat_chart 一键导入全部信息"
+                    "（区域、参会者、布局、排座）。"
+                )
+                analysis = "\n".join(parts)
+            else:
+                # Fall back to raw text for attendee lists, etc.
+                excel_text = read_excel_sheets_as_text(
+                    file_path=excel_att["path"],
+                )
+                analysis = f"Excel 文件原始内容：\n{excel_text}"
+
             return await self._create_plan_from_analysis(
-                state, analysis, user_msg, attachments
+                state, analysis, user_msg, attachments,
             )
         except Exception as e:
             reply = f"Excel 读取出错：{e}"
@@ -335,22 +381,30 @@ class PlannerPlugin(AgentPlugin):
                     "result": None,
                 })
 
-            # Append plan summary to reply
+            # Append plan summary to reply (user-friendly, no plugin names)
+            _PLUGIN_LABEL = {
+                "organizer": "🏢 创建活动",
+                "seating": "🪑 排座布局",
+                "badge": "🏷️ 铭牌设计",
+                "checkin": "✅ 签到设置",
+                "pagegen": "📱 页面生成",
+            }
             if task_plan:
-                reply_text += "\n\n📋 **任务计划：**\n"
+                reply_text += "\n\n📋 接下来我会依次完成：\n"
                 for i, t in enumerate(task_plan, 1):
-                    reply_text += (
-                        f"  {i}. [{t['plugin']}] {t['description']}\n"
+                    label = _PLUGIN_LABEL.get(
+                        t["plugin"], t["description"]
                     )
+                    reply_text += f"  {i}. {label}\n"
                 reply_text += (
-                    "\n说「开始执行」我会自动处理这些任务，"
+                    "\n说「开始」我会自动处理，"
                     "或者你可以先修改计划。"
                 )
 
             # If there are questions, add them
             questions = plan_data.get("questions", [])
             if questions:
-                reply_text += "\n\n❓ **需要确认：**\n"
+                reply_text += "\n\n❓ 需要确认：\n"
                 for q in questions:
                     reply_text += f"  · {q}\n"
 
@@ -360,6 +414,13 @@ class PlannerPlugin(AgentPlugin):
         }
         if task_plan:
             result["task_plan"] = task_plan
+            # Quick reply buttons for plan confirmation
+            qr = [
+                {"label": "▶️ 开始执行", "value": "开始执行", "style": "primary"},
+            ]
+            if questions:
+                qr.append({"label": "修改计划", "value": "我想修改计划", "style": "default"})
+            result["quick_replies"] = qr
 
         # Store structured event_info as event_draft for organizer
         if plan_data and plan_data.get("event_info"):

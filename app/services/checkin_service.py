@@ -1,6 +1,7 @@
 """Check-in processing — business logic for attendee check-in."""
 
 import re
+import time
 import uuid
 
 from pypinyin import lazy_pinyin, Style
@@ -11,6 +12,10 @@ from app.services.exceptions import (
     AttendeeNotFoundError,
     InvalidStateTransitionError,
 )
+
+# ── Simple TTL cache for stats (avoids DB hit on every 15s poll) ──
+_stats_cache: dict[str, tuple[float, dict]] = {}  # event_id → (ts, data)
+_STATS_TTL = 10.0  # seconds
 
 
 def _is_ascii(s: str) -> bool:
@@ -93,6 +98,10 @@ class CheckinService:
 
         # Update status to checked_in
         await self._attendee_repo.update(attendee.id, status="checked_in")
+
+        # Bust stats cache so next poll reflects the change
+        # (we need event_id; get it from the attendee)
+        self._invalidate_stats_cache(attendee.event_id)
 
         # Find assigned seat
         seat = await self._seat_repo.get_by_attendee(attendee_id)
@@ -185,14 +194,38 @@ class CheckinService:
             for a in matches[:limit]
         ]
 
-    async def get_checkin_stats(self, event_id: uuid.UUID) -> dict:
-        """Get check-in statistics for an event."""
+    async def get_checkin_stats(
+        self, event_id: uuid.UUID, *, bust_cache: bool = False,
+    ) -> dict:
+        """Get check-in statistics for an event.
+
+        Results are cached for ``_STATS_TTL`` seconds to reduce DB load
+        when many attendees poll the stats endpoint simultaneously.
+        """
+        key = str(event_id)
+        now = time.monotonic()
+
+        if not bust_cache and key in _stats_cache:
+            ts, cached = _stats_cache[key]
+            if now - ts < _STATS_TTL:
+                return cached
+
         attendees = await self._attendee_repo.get_by_event(event_id)
         total = len(attendees)
-        checked_in = sum(1 for a in attendees if a.status == "checked_in")
-        return {
+        checked_in = sum(
+            1 for a in attendees if a.status == "checked_in"
+        )
+        result = {
             "total": total,
             "checked_in": checked_in,
             "remaining": total - checked_in,
-            "rate": round(checked_in / total * 100, 1) if total > 0 else 0,
+            "rate": round(
+                checked_in / total * 100, 1,
+            ) if total > 0 else 0,
         }
+        _stats_cache[key] = (now, result)
+        return result
+
+    def _invalidate_stats_cache(self, event_id: uuid.UUID) -> None:
+        """Bust the stats cache after a check-in mutation."""
+        _stats_cache.pop(str(event_id), None)

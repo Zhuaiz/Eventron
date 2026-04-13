@@ -1,0 +1,52 @@
+# ============================================================
+# Eventron — Production multi-stage build
+# ============================================================
+
+# ── Stage 1: Build frontend ──────────────────────────────────
+FROM node:20-alpine AS web-builder
+
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --registry=https://registry.npmmirror.com
+COPY web/ .
+ENV VITE_API_BASE=""
+RUN npm run build
+
+# ── Stage 2: Python backend ─────────────────────────────────
+FROM python:3.11-slim AS backend
+
+WORKDIR /app
+
+# China PyPI mirror for faster builds
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
+    PIP_TRUSTED_HOST=mirrors.aliyun.com
+
+# System deps for WeasyPrint + fonts
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
+    libffi-dev libcairo2 fonts-noto-cjk curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python deps (cached layer)
+COPY pyproject.toml .
+RUN mkdir -p app agents tools channels && \
+    touch app/__init__.py agents/__init__.py tools/__init__.py channels/__init__.py && \
+    pip install --no-cache-dir . && \
+    rm -rf app agents tools channels
+
+# Copy source
+COPY . .
+RUN pip install --no-cache-dir -e .
+
+# Copy built frontend into static serving dir
+COPY --from=web-builder /web/dist /app/web/dist
+
+# Create non-root user
+RUN useradd -m -r eventron && \
+    mkdir -p /app/data /app/uploads && \
+    chown -R eventron:eventron /app/data /app/uploads
+
+EXPOSE 8000
+USER eventron
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

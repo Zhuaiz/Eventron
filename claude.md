@@ -54,7 +54,7 @@ Import rules: models→nothing | repos→models | services→repos | api→servi
 - `priority` drives seat assignment algorithms (front row, zone matching).
 - `attrs` JSONB = escape hatch. Never add columns for one-off attributes.
 
-**Seat:** event_id(FK), row_num, col_num, label, seat_type(normal|reserved|disabled|aisle), zone(nullable String, e.g. "贵宾区"/"嘉宾区"), pos_x(Float, canvas units), pos_y(Float, canvas units), rotation(Float, degrees), attendee_id(FK). UniqueConstraint(event_id, row_num, col_num). Free-form layouts use pos_x/pos_y for arbitrary positioning (roundtable circles, U-shape, theater arcs).
+**Seat:** event_id(FK), row_num, col_num, label, seat_type(normal|reserved|disabled|aisle), zone(nullable String, e.g. "贵宾区"/"嘉宾区"), pos_x(Float, canvas units), pos_y(Float, canvas units), rotation(Float, degrees), area_id(FK nullable→VenueArea), attendee_id(FK). UniqueConstraint(event_id, area_id, row_num, col_num). Free-form layouts use pos_x/pos_y for arbitrary positioning (roundtable circles, U-shape, theater arcs).
 
 **ApprovalRequest:** event_id, requester_id, change_type(swap|add_person|remove|reassign|bulk_change), change_detail(JSONB), status(pending|approved|rejected|expired), lg_thread_id
 
@@ -69,21 +69,25 @@ Plugins receive a `services` dict at construction: `{event, seating, attendee, l
 Base class provides `self.event_svc`, `self.seat_svc`, `self.attendee_svc`, `self.get_llm(tier)`.
 `PluginRegistry` — register/get/active_plugins/build_routing_prompt(). Orchestrator NEVER hard-codes plugin names.
 
-**AgentState:** messages, current_plugin, user_profile, event_id, pending_approval, turn_output, attachments, task_plan, reflection
-**Graph:** orchestrator → conditional edge → plugin → reflect → END (when turn_output set)
-**Plan-and-Execute:** attachments present → planner → task decomposition → user confirms → plugins execute
-**HITL:** Only `change` plugin uses `interrupt()`. PostgresSaver in prod, MemorySaver in tests.
+**AgentState:** messages, current_plugin, user_profile, event_id, pending_approval, turn_output, plan_output, attachments, task_plan, parts, reflection
+**Graph (v2 — tool-calling routing):** orchestrator_agent (ReAct loop) → reflect → END. Orchestrator is a ReAct agent whose tools include `delegate_to_{plugin}` (one per active plugin) + utility tools (list_events, describe_capabilities). Multi-step orchestration (planner→organizer→seating) happens via sequential tool calls within one ReAct loop. No more continue_plan state machine or conditional edges.
+**Delegate tools:** `agents/tools/routing_tools.py` — `make_delegate_tools()` wraps each plugin.handle() as a LangChain tool. Captures state side-effects (event_id, tool_calls, parts) via mutable accumulator closures. Scope filtering: when scope="seating", only delegate_to_seating exposed.
+**Nested ReAct:** Orchestrator ReAct loop calls delegate_to_seating → inside that tool, SeatingPlugin runs its own ReAct loop with seating-specific tools. Outer loop handles routing, inner loops handle domain execution. Same pattern as Claude Code / OpenAI Agents SDK.
+**Identity gate:** Pre-check in orchestrator_agent_node before ReAct loop. If user_profile is None and plugins need identity, runs identity plugin first.
+**HITL:** Change plugin uses quick_replies for approval flow (interrupt() planned but not active).
 
 **LLM Tiers:** fast(deepseek)=orchestrator/identity/checkin/badge/guide, smart(gpt-4o)=organizer/seating/change/planner-planning, strong(claude-sonnet)=planner-vision/pagegen-ReAct, max(claude-opus)=pagegen-internal-generation(deploy_custom_checkin_page内部LLM调用，16K tokens)
 
 **9 Plugins (all LLM-first):** identity(LLM name extraction+heuristic fallback), planner(multimodal+task decomposition, Excel via read_excel_sheets_as_text→LLM), organizer(event CRUD+capacity calc), **seating(ReAct tool-calling agent: 14 LangChain tools via bind_tools+react_loop)**, checkin, change(LLM classifies change type+extracts details, HITL), badge(LLM sub-intent routing), **pagegen(ReAct agent: 11 tools, "vibe coding" — deploy_custom takes short description, internal max-tier LLM generates complete HTML page with CSS inline)**, guide
 **agent_chat.py** now uses real LangGraph: `build_graph()` → `graph.ainvoke()` with service-injected plugins.
 **Multimodal input:** agent_chat accepts multipart form data (images/Excel/PDF), planner uses vision LLM to extract event info.
-**File processing tools:** `tools/file_extract.py` — build_vision_message, extract_from_excel, extract_from_pdf, detect_file_type. `tools/excel_io.py` — read_excel_sheets_as_text (raw text for LLM). `tools/event_files.py` — pure filesystem helpers (load_manifest, find_files_by_type, find_latest_file_by_type) for reading event file store.
+**File processing tools:** `tools/file_extract.py` — build_vision_message, extract_from_excel, extract_from_pdf, detect_file_type. `tools/excel_io.py` — read_excel_sheets_as_text (raw text for LLM), **parse_seat_layout_structured** (spatial Excel parser: extracts areas, attendee positions, aisles, stage, roles from sheet names; returns structured dict). `tools/event_files.py` — pure filesystem helpers (load_manifest, find_files_by_type, find_latest_file_by_type) for reading event file store. `tools/chinese_norm.py` — **T→S normalization** for event domain terms (normalize_event_term, normalize_role, normalize_zone, infer_role_from_area_name, clean_name). Curated char/word mapping, never touches personal names.
 **File persistence:** agent_chat uploads are persisted to `event_files` API (`uploads/events/{event_id}/`), not temp dir.
 **Event file access:** Base `AgentPlugin.get_event_files(event_id, file_type)` lets any plugin look up previously uploaded files. Seating and planner plugins auto-detect when user references files without current attachment and fall back to event file store.
 **Multimodal messages:** `_build_multimodal_message()` embeds images as base64 data URIs in `HumanMessage(content=[...])`. `extract_text_content()` in `agents/llm_utils.py` safely extracts text from both string and multimodal content formats — used by all plugins and orchestrator.
 **Duplicate file handling:** Both `agent_chat.py` and `event_files.py` replace old manifest entries when uploading a file with the same original filename (old disk file also deleted).
+**Utility tools in orchestrator:** `agents/tools/general_tools.py` (list_events, get_event_detail, get_event_summary, describe_capabilities) are directly available in the orchestrator's ReAct loop alongside delegate tools. No separate chat_fallback_node needed.
+**Chat history persistence:** Frontend uses sessionStorage. AssistantPage: single key `eventron_assistant_chat`. SubAgentPanel: per event+scope key `eventron_sub_{eventId}_{scope}`. Survives page navigation, cleared on explicit "清空" or session end.
 
 ### Agent Self-Evolution System
 
@@ -95,7 +99,7 @@ Three-layer closed-loop self-optimization, all under `agents/`:
 
 **Layer 3 — Prompt Evolution (`prompt_evolution.py`):** Versioned system prompts per plugin under `data/prompt_versions/{plugin}/`. `PromptVersion` tracks: uses, avg_score, feedback counts, A/B ratio. `PluginPromptManager.get_active_prompt()` routes traffic between baseline and candidates. `evaluate_candidates()` auto-promotes winners (score > baseline + 0.1) and drops losers. `generate_improved_prompt()` uses LLM to create new variants from failure analysis.
 
-**Graph integration:** `plugin → reflect → END`. Reflect node: validate result → record to memory → update prompt scores. Experience injection: before each plugin, `_experiences` injected from memory.
+**Graph integration:** `orchestrator_agent → reflect → END`. Reflect node: validate result → record to memory → update prompt scores. Experience injection: inside delegate tools, `_experiences` injected from memory before each plugin.handle().
 **Frontend:** 👍👎 buttons on AI messages (via `FeedbackButtons` in ChatMessage), reflection quality bar. `POST /agent/chat/feedback` records to memory. `GET /agent/chat/stats/{event_id}` returns aggregated stats.
 
 ### Agent Design Principle — Tool-Calling ReAct Agents
@@ -113,13 +117,23 @@ Three-layer closed-loop self-optimization, all under `agents/`:
 3. Plugin `handle()`: build tools → bind to LLM → run `react_loop()` → return result
 4. System prompt tells LLM its capabilities and workflow rules (e.g. "verify after each operation")
 
+### Structured Message Parts Protocol
+
+Tools can return structured UI card data alongside text responses. The frontend renders each card type with a dedicated React component.
+
+**Protocol:** `agents/message_parts.py` defines part constructors: `seat_map_part`, `attendee_table_part`, `event_card_part`, `page_preview_part`, `confirmation_part`, `file_link_part`, `stats_part`.
+**Accumulator:** `PARTS_ACCUMULATOR` (contextvars) lets any tool push parts without changing return types. Set by orchestrator before ReAct loop.
+**API:** `ChatResponse.parts: list[dict] | None`. SSE `done` event includes `parts` field.
+**Frontend:** `MessagePartCards.tsx` — dispatcher component `MessagePartCard` maps type → React component. `MessageParts` renders a list. Integrated into `ChatMessage.tsx` between tool calls and quick replies.
+**Card types:** seat_map (layout stats + zones + progress bar), attendee_table (scrollable roster), event_card (summary with status badge), page_preview (iframe), confirmation (action buttons), file_link (download badge), stats (KV grid).
+
 **Why ReAct over hardcoded routing:**
 - LLM handles messy inputs (merged cells, mixed languages, vague user intent) that regex/heuristics cannot
 - LLM chains multiple tools autonomously (read Excel → import attendees → create layout → set zones → verify)
 - Self-verification: LLM calls `view_seats` after layout creation to confirm results
 - Tools stay pure (structured input → structured output), all intelligence lives in the LLM layer
 
-**Seating tools (14):** get_event_info, view_seats, create_layout, create_custom_layout, auto_assign, set_zone, set_zone_unzoned, read_event_excel, list_attendees, import_attendees, list_attendees_with_seats, swap_two_attendees, reassign_attendee_seat, unassign_attendee
+**Seating tools (20):** get_event_info, view_seats, create_layout, create_custom_layout, auto_assign, set_zone, set_zone_unzoned, read_event_excel, **analyze_seat_chart**(structured Excel parser→areas/positions/roles), **import_from_seat_chart**(one-click: create areas+import attendees+layout+assign), list_attendees, import_attendees, list_attendees_with_seats, swap_two_attendees, reassign_attendee_seat, unassign_attendee, list_areas, create_area, generate_area_layout, delete_area
 
 **Other plugins (LLM-first JSON, not yet tool-calling):** identity, change, badge, pagegen use `extract_json()` from `agents/llm_utils.py` for robust LLM JSON parsing (3-layer: direct → code block → embedded).
 
@@ -152,7 +166,7 @@ EventronError → NotFoundError(Event/Attendee/Seat/Template) | SeatNotAvailable
 
 ## Test Status
 
-194 unit tests passing. Files: test_seating_engine(26), test_excel_io(10), test_schemas(26), test_services(19), test_event_service(41), test_attendee_service(15), test_badge_template_service(13), test_auth_service(15), test_identity_service(13), test_import_service(14), test_dashboard_service(3). Skipped: test_qr_gen (missing qrcode dep in dev env).
+234 unit tests passing. Files: test_seating_engine(26), test_excel_io(10), test_schemas(26), test_services(19), test_event_service(41), test_attendee_service(15), test_badge_template_service(13), test_auth_service(15), test_identity_service(13), test_import_service(14), test_dashboard_service(3), test_chinese_norm(24), test_seat_layout_parser(16). Skipped: test_qr_gen (missing qrcode dep in dev env).
 
 ## Implementation Phases
 
@@ -217,6 +231,19 @@ EventronError → NotFoundError(Event/Attendee/Seat/Template) | SeatNotAvailable
   - **Plugin wiring**: `AgentPlugin._effective_prompt(default)` and `_effective_tier()` in base class. All 7 plugins with system prompts + orchestrator updated to call these. Pagegen uses `get_effective_gen_tier()` for internal LLM.
   - **Frontend**: `AgentSettingsPage` — card-based UI per plugin with expand/collapse, model tier selector (fast/smart/strong/max), system prompt textarea editor, enabled toggle, save/reset. Route `/agent-settings`, sidebar nav entry.
 
+- **Phase 13** — Multi-area venue support (VenueArea):
+  - **VenueArea model** (`app/models/venue_area.py`): One Event → many Areas. Fields: name, layout_type, rows, cols, display_order, offset_x, offset_y, stage_label. Cascade delete-orphan from Event.
+  - **Seat.area_id**: Optional FK to venue_areas. UniqueConstraint changed from `(event_id, row_num, col_num)` to `(event_id, area_id, row_num, col_num)` so different areas can share row/col numbers.
+  - **Repository**: `VenueAreaRepository` with `get_by_event()` ordered by display_order. `SeatRepository.delete_by_area()` for area-scoped seat deletion.
+  - **Service**: `SeatingService` extended with area CRUD + `generate_area_layout()` — deletes area-specific seats then recreates with offset positioning.
+  - **API**: `app/api/venue_areas.py` — CRUD routes under `/{event_id}/areas` + `POST /{area_id}/generate-layout`.
+  - **Schemas**: VenueAreaCreate, VenueAreaUpdate, VenueAreaResponse, VenueAreaWithSeats. SeatResponse gains `area_id`.
+  - **Agent tools**: 4 new seating tools (list_areas, create_area, generate_area_layout, delete_area). System prompt updated with multi-area workflow. max_iter 10→15.
+  - **Agent workflow enforcement**: System prompt rewritten with "核心原则：操作必须完成全流程" — read Excel → import attendees → create layout → set zones → auto_assign → view_seats verify.
+  - **Graceful overflow**: All 4 assignment algorithms changed from ValueError to partial assignment when attendees > seats.
+  - **Frontend**: SeatingTab gains area management panel (create/delete/regenerate areas), SVG area boundary rects with dashed borders, area name labels, per-area stage bars.
+  - **Migrations**: `e5a2b3c4d507` (create venue_areas table + seats.area_id FK), `f7c3d8e9a012` (fix unique constraint to include area_id).
+
 ### Next 🔜
 - **Phase B (Portal)** — 物料计算与物料管理(按活动规模自动估算+手动调整), 铭牌设计(模板管理收进badge agent+活动内BadgeTab，外层菜单降级admin-only), 签到实时看板(WebSocket), 审批中心
 - **Phase C (Portal)** — 团队协作(多Organizer), 自动审批规则引擎
@@ -233,9 +260,9 @@ make all              # docker compose up --build
 
 ## Git
 
-Repo: https://github.com/Zhuaiz/Eventron (Apache 2.0)
-Push: `git remote set-url origin https://Zhuaiz:<PAT>@github.com/Zhuaiz/Eventron.git && git push`
-PAT 存本地，不入库。推完后 `git remote set-url origin https://github.com/Zhuaiz/Eventron.git` 清掉 token。
+Repo: https://github.com/AntiNoise-ai/Eventron (Apache 2.0)
+Push: `git remote set-url origin https://AntiNoise-ai:<PAT>@github.com/AntiNoise-ai/Eventron.git && git push`
+PAT 存本地，不入库。推完后 `git remote set-url origin https://github.com/AntiNoise-ai/Eventron.git` 清掉 token。
 
 ## Don'ts
 

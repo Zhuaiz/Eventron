@@ -8,16 +8,16 @@
  * - HITL interactive choice buttons
  * - File upload (images, Excel, PDF)
  */
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, DragEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Send, Paperclip, FileImage, FileSpreadsheet, FileText,
-  Loader2, Bot, Trash2, ExternalLink, X, Sparkles,
+  Loader2, Bot, Trash2, ExternalLink, X, Sparkles, Upload,
 } from 'lucide-react';
 import { apiClient } from '../lib/api';
 import { ChatMessage, parseChoices } from '../components/ChatMessage';
-import type { ChatMessageData, ToolCallInfo } from '../components/ChatMessage';
+import type { ChatMessageData, ToolCallInfo, QuickReplyData } from '../components/ChatMessage';
 
 interface SubTask {
   id: string;
@@ -38,14 +38,89 @@ export function AssistantPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [messages, setMessages] = useState<ChatMessageData[]>([
-    { role: 'assistant', content: WELCOME_MSG, timestamp: new Date() },
-  ]);
+  // ── Persist chat state in sessionStorage ─────────────────
+  const STORAGE_KEY = 'eventron_assistant_chat';
+
+  const loadPersistedState = () => {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      const saved = JSON.parse(raw);
+      return {
+        messages: (saved.messages || []).map((m: ChatMessageData) => ({
+          ...m,
+          timestamp: m.timestamp ? new Date(m.timestamp) : undefined,
+        })),
+        sessionId: saved.sessionId || null,
+        taskPlan: saved.taskPlan || null,
+        lastEventId: saved.lastEventId || null,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const persisted = loadPersistedState();
+  const [messages, setMessages] = useState<ChatMessageData[]>(
+    persisted?.messages?.length
+      ? persisted.messages
+      : [{ role: 'assistant', content: WELCOME_MSG, timestamp: new Date() }],
+  );
   const [input, setInput] = useState('');
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(persisted?.sessionId ?? null);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [taskPlan, setTaskPlan] = useState<SubTask[] | null>(null);
-  const [lastEventId, setLastEventId] = useState<string | null>(null);
+  const [taskPlan, setTaskPlan] = useState<SubTask[] | null>(persisted?.taskPlan ?? null);
+  const [lastEventId, setLastEventId] = useState<string | null>(persisted?.lastEventId ?? null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  const ACCEPTED_TYPES = ['image/', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel', 'text/csv', 'application/pdf'];
+  const isAcceptedFile = (file: File) =>
+    ACCEPTED_TYPES.some((t) => file.type.startsWith(t)) || /\.(xlsx?|csv|pdf)$/i.test(file.name);
+
+  const handleDragEnter = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (e.dataTransfer?.types.includes('Files')) setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) setIsDragging(false);
+  }, []);
+
+  const handleDragOver = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    dragCounterRef.current = 0;
+    const files = Array.from(e.dataTransfer?.files || []).filter(isAcceptedFile);
+    if (files.length > 0) {
+      setPendingFiles((prev) => [...prev, ...files]);
+    }
+  }, []);
+
+  // Save to sessionStorage whenever state changes
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+        messages,
+        sessionId,
+        taskPlan,
+        lastEventId,
+      }));
+    } catch {
+      // quota exceeded — silently ignore
+    }
+  }, [messages, sessionId, taskPlan, lastEventId]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -84,13 +159,16 @@ export function AssistantPage() {
       }),
     onSuccess: (data) => {
       setSessionId(data.session_id);
-      const choices = parseChoices(data.reply);
+      const rawQr = (data.quick_replies || []) as QuickReplyData[];
+      const choices = rawQr.length > 0 ? undefined : parseChoices(data.reply) || undefined;
       const newMsg: ChatMessageData = {
         role: 'assistant',
         content: data.reply,
         timestamp: new Date(),
         toolCalls: data.tool_calls as ToolCallInfo[] | undefined,
-        choices: choices.length > 0 ? choices : undefined,
+        quickReplies: rawQr.length > 0 ? rawQr : undefined,
+        choices: choices && choices.length > 0 ? choices : undefined,
+        parts: data.parts || undefined,
       };
       if (data.event_id) {
         newMsg.eventId = data.event_id;
@@ -168,6 +246,7 @@ export function AssistantPage() {
     setTaskPlan(null);
     setLastEventId(null);
     setPendingFiles([]);
+    sessionStorage.removeItem(STORAGE_KEY);
   };
 
   const getFileIcon = (file: File) => {
@@ -177,7 +256,21 @@ export function AssistantPage() {
   };
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div
+      className="flex flex-col flex-1 min-h-0 relative"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* Drag overlay */}
+      {isDragging && (
+        <div className="absolute inset-0 z-50 bg-indigo-50/80 border-2 border-dashed border-indigo-400 rounded-xl flex flex-col items-center justify-center pointer-events-none">
+          <Upload size={40} className="text-indigo-500 mb-2" />
+          <p className="text-indigo-600 font-medium text-sm">松开即可上传文件</p>
+          <p className="text-indigo-400 text-xs mt-1">支持图片、Excel、PDF</p>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between pb-4 border-b border-gray-200">
         <div className="flex items-center gap-3">
@@ -215,17 +308,27 @@ export function AssistantPage() {
         <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-2.5 flex-shrink-0">
           <div className="text-xs font-semibold text-indigo-700 mb-1.5">任务计划</div>
           <div className="space-y-1">
-            {taskPlan.map((task) => (
-              <div key={task.id} className="flex items-center gap-2 text-sm">
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                  task.status === 'done' ? 'bg-green-500' :
-                  task.status === 'in_progress' ? 'bg-yellow-500 animate-pulse' :
-                  task.status === 'error' ? 'bg-red-500' : 'bg-gray-300'
-                }`} />
-                <span className="text-indigo-600 font-medium">[{task.plugin}]</span>
-                <span className="text-gray-700">{task.description}</span>
-              </div>
-            ))}
+            {taskPlan.map((task) => {
+              const pluginLabel: Record<string, string> = {
+                organizer: '🏢 创建活动',
+                seating: '🪑 排座布局',
+                badge: '🏷️ 铭牌设计',
+                checkin: '✅ 签到设置',
+                pagegen: '📱 页面生成',
+              };
+              return (
+                <div key={task.id} className="flex items-center gap-2 text-sm">
+                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                    task.status === 'done' ? 'bg-green-500' :
+                    task.status === 'in_progress' ? 'bg-yellow-500 animate-pulse' :
+                    task.status === 'error' ? 'bg-red-500' : 'bg-gray-300'
+                  }`} />
+                  <span className="text-gray-700">
+                    {pluginLabel[task.plugin] || task.description}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -302,6 +405,21 @@ export function AssistantPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
+              onPaste={(e) => {
+                const items = e.clipboardData?.items;
+                if (!items) return;
+                const pastedFiles: File[] = [];
+                for (let i = 0; i < items.length; i++) {
+                  if (items[i].kind === 'file') {
+                    const file = items[i].getAsFile();
+                    if (file) pastedFiles.push(file);
+                  }
+                }
+                if (pastedFiles.length > 0) {
+                  e.preventDefault();
+                  setPendingFiles((prev) => [...prev, ...pastedFiles]);
+                }
+              }}
               placeholder="描述你的需求，或上传活动海报/名单...（Shift+Enter 换行）"
               disabled={chatMutation.isPending}
               rows={1}

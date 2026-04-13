@@ -13,11 +13,11 @@ def register_all_defaults() -> None:
     from app.services.agent_config_service import register_default
 
     # ── Orchestrator ────────────────────────────────────────────
-    from agents.orchestrator import ROUTER_SYSTEM_TEMPLATE
+    from agents.orchestrator import ORCHESTRATOR_DEFAULT_PROMPT
     register_default(
         "orchestrator",
-        model_tier="fast",
-        system_prompt=ROUTER_SYSTEM_TEMPLATE,
+        model_tier="smart",
+        system_prompt=ORCHESTRATOR_DEFAULT_PROMPT,
     )
 
     # ── Identity ────────────────────────────────────────────────

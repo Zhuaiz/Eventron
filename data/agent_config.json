@@ -1,0 +1,27 @@
+{
+  "_llm_providers": {
+    "fast": {
+      "model": "qwen-turbo",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "provider": "qwen"
+    },
+    "smart": {
+      "model": "qwen-plus",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "provider": "qwen"
+    },
+    "max": {
+      "model": "qwen-max",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "provider": "qwen"
+    },
+    "strong": {
+      "model": "qwen-plus",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "provider": "qwen"
+    }
+  },
+  "seating": {
+    "model_tier": "max"
+  }
+}
