@@ -7,8 +7,8 @@
 set -euo pipefail
 
 API_URL="http://certkeeper.sjtickettech.com/api/cert/pull"
-TOKEN="zGltc7ywVd-Nc5Ag-JoLSmV_rpddnxMFVijB58ySTqc"
-DOMAIN="event.bheartmedia.com"
+TOKEN="L17zFsKRZejBUcN8EGlOyJzvlEiOqjtRCX_KzibZ_80"
+DOMAIN="bheartmedia.com"
 CERT_DIR="/opt/eventron/ssl"
 LOG_FILE="/var/log/cert-pull.log"
 
@@ -73,7 +73,7 @@ chmod 644 "$CERT_DIR/$DOMAIN.pem"
 chmod 600 "$CERT_DIR/$DOMAIN.key"
 
 # nginx -t 验证，失败则回滚
-if ! docker exec nginx nginx -t 2>/dev/null; then
+if ! docker exec repo-nginx-1 nginx -t 2>/dev/null; then
     log "ERROR: nginx -t 失败，回滚"
     if [ -f "$CERT_DIR/$DOMAIN.pem.bak" ]; then
         mv "$CERT_DIR/$DOMAIN.pem.bak" "$CERT_DIR/$DOMAIN.pem"
@@ -83,6 +83,6 @@ if ! docker exec nginx nginx -t 2>/dev/null; then
 fi
 
 # Reload nginx
-docker exec nginx nginx -s reload
+docker exec repo-nginx-1 nginx -s reload
 echo "$NEW_FP" > "$FP_FILE"
 log "OK: 证书已更新 ($OLD_FP → $NEW_FP)"

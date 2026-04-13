@@ -98,12 +98,12 @@ jobs:
             bash deploy/cert-pull.sh || {
                 echo "⚠️ 证书拉取失败，检查是否首次部署"
                 # 如果 ssl 目录为空，放一个自签名证书让 nginx 能启动
-                if [ ! -f /opt/eventron/ssl/event.bheartmedia.com.pem ]; then
+                if [ ! -f /opt/eventron/ssl/bheartmedia.com.pem ]; then
                     echo "生成临时自签名证书..."
                     openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
-                        -keyout /opt/eventron/ssl/event.bheartmedia.com.key \
-                        -out /opt/eventron/ssl/event.bheartmedia.com.pem \
-                        -subj "/CN=event.bheartmedia.com" 2>/dev/null
+                        -keyout /opt/eventron/ssl/bheartmedia.com.key \
+                        -out /opt/eventron/ssl/bheartmedia.com.pem \
+                        -subj "/CN=bheartmedia.com" 2>/dev/null
                 fi
             }
 
