@@ -23,7 +23,7 @@ jobs:
     name: Deploy to Aliyun
     runs-on: ubuntu-latest
     needs: ci-gate
-    environment: prod
+    environment: production
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -31,9 +31,25 @@ jobs:
       - name: Setup SSH key
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SERVER_PASSWORD }}" > ~/.ssh/id_deploy
+          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
           ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Generate .env from template + secrets
+        run: |
+          envsubst < deploy/.env.prod.template > .env.generated
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
+          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+          QWEN_ACCESS_KEY_SECRET: ${{ secrets.QWEN_ACCESS_KEY_SECRET }}
+          WECOM_BOT_SECRET: ${{ secrets.WECOM_BOT_SECRET }}
+          WECOM_BOT_TOKEN: ${{ secrets.WECOM_BOT_TOKEN }}
+          WECOM_BOT_AES_KEY: ${{ secrets.WECOM_BOT_AES_KEY }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
       - name: Rsync code to server
         run: |
@@ -55,7 +71,7 @@ jobs:
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_PASSWORD }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
           port: 22
           command_timeout: 30m
           script: |
@@ -64,12 +80,18 @@ jobs:
 
             cd "$DEPLOY_DIR/repo"
 
-            echo "=== [1/4] 同步 .env ==="
-            if [ ! -f "$DEPLOY_DIR/.env" ]; then
-                echo "❌ 缺少 $DEPLOY_DIR/.env，请先配置！"
+            echo "=== [1/4] 同步 .env (CI 自动生成) ==="
+            if [ -f "$DEPLOY_DIR/repo/.env.generated" ]; then
+                cp "$DEPLOY_DIR/repo/.env.generated" .env
+                rm -f "$DEPLOY_DIR/repo/.env.generated"
+                echo "✅ .env 由 CI 自动生成"
+            elif [ -f "$DEPLOY_DIR/.env" ]; then
+                cp "$DEPLOY_DIR/.env" .env
+                echo "⚠️ 使用服务器本地 .env（fallback）"
+            else
+                echo "❌ 无 .env 来源！请配置 GitHub Secrets"
                 exit 1
             fi
-            cp "$DEPLOY_DIR/.env" .env
 
             echo "=== [2/4] 构建镜像 ==="
             docker compose -f docker-compose.prod.yml build app 2>&1 || {
