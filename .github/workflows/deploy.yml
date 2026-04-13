@@ -38,7 +38,10 @@ jobs:
             set -euo pipefail
 
             DEPLOY_DIR=/opt/eventron
-            REPO_URL=https://${{ secrets.GH_PAT }}@github.com/AntiNoise-ai/Eventron.git
+            # 国内用 ghproxy 镜像加速
+            PROXY=https://ghproxy.net
+            REPO_URL=${PROXY}/https://${{ secrets.GH_PAT }}@github.com/AntiNoise-ai/Eventron.git
+            REPO_URL_CLEAN=${PROXY}/https://github.com/AntiNoise-ai/Eventron.git
 
             echo "=== [1/5] 拉取最新代码 ==="
             if [ ! -d "$DEPLOY_DIR/repo" ]; then
@@ -49,7 +52,7 @@ jobs:
                 git fetch origin main
                 git reset --hard origin/main
                 # 清掉 token
-                git remote set-url origin https://github.com/AntiNoise-ai/Eventron.git
+                git remote set-url origin "$REPO_URL_CLEAN"
             fi
 
             cd "$DEPLOY_DIR/repo"
