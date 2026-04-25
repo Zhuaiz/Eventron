@@ -92,6 +92,27 @@ def create_app() -> FastAPI:
     async def health() -> dict:
         return {"status": "ok"}
 
+    @app.get("/api/version")
+    async def version() -> dict:
+        """Build identity for the running container.
+
+        All fields come from build-time env vars baked in by Dockerfile
+        (`ARG GIT_SHA`/`BUILD_TIME`/`BUILD_BRANCH` → `ENV`). If a value
+        is missing, the deploy didn't pass that build-arg — treat as
+        "unknown" rather than guessing.
+        """
+        import os
+        from datetime import datetime, timezone
+        sha = os.environ.get("EVENTRON_GIT_SHA", "unknown")
+        return {
+            "sha": sha[:7] if sha != "unknown" else "unknown",
+            "sha_full": sha,
+            "branch": os.environ.get("EVENTRON_GIT_BRANCH", "unknown"),
+            "build_time": os.environ.get("EVENTRON_BUILD_TIME", "unknown"),
+            "queried_at": datetime.now(timezone.utc).isoformat(),
+            "app_version": "0.1.0",
+        }
+
     # ── Serve frontend static files (production) ─────────────
     if _WEB_DIST.is_dir():
         from fastapi.responses import FileResponse

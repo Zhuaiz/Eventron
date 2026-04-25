@@ -108,6 +108,12 @@ jobs:
             }
 
             echo "=== [2/4] 构建镜像 ==="
+            export GIT_SHA="${{ github.sha }}"
+            export GIT_BRANCH="${{ github.ref_name }}"
+            export BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "  · GIT_SHA=$GIT_SHA"
+            echo "  · GIT_BRANCH=$GIT_BRANCH"
+            echo "  · BUILD_TIME=$BUILD_TIME"
             docker compose -f docker-compose.prod.yml build app 2>&1 || {
                 echo "⚠️ 构建失败，重试一次..."
                 docker compose -f docker-compose.prod.yml build app

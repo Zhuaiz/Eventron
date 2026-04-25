@@ -51,6 +51,14 @@ RUN useradd -m -r eventron && \
     mkdir -p /app/data /app/uploads && \
     chown -R eventron:eventron /app/data /app/uploads
 
+# ── Build identity (passed by CI via --build-arg) ────────────
+ARG GIT_SHA=unknown
+ARG GIT_BRANCH=unknown
+ARG BUILD_TIME=unknown
+ENV EVENTRON_GIT_SHA=${GIT_SHA} \
+    EVENTRON_GIT_BRANCH=${GIT_BRANCH} \
+    EVENTRON_BUILD_TIME=${BUILD_TIME}
+
 EXPOSE 8000
 USER eventron
 

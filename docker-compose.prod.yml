@@ -40,6 +40,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.prod
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_BRANCH: ${GIT_BRANCH:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
     restart: always
     env_file:
       - .env
