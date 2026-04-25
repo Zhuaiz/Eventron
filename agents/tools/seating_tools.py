@@ -781,6 +781,89 @@ def make_seating_tools(
         await seat_svc.unassign_seat(current.id)
         return f"已取消 {name} 的座位 {current.label}"
 
+    @tool
+    async def delete_attendee_by_name(name: str) -> str:
+        """删除一名参会者（按姓名查找）。会先解除其座位再删人，**不可恢复**。
+
+        Args:
+            name: 要删除的参会者姓名（精确匹配）
+        """
+        attendees = await attendee_svc.list_attendees_for_event(eid)
+        att = next((a for a in attendees if a.name == name), None)
+        if not att:
+            return f"未找到参会者: {name}"
+        seats = await seat_svc.get_seats(eid)
+        current = next((s for s in seats if s.attendee_id == att.id), None)
+        if current:
+            await seat_svc.unassign_seat(current.id)
+        ok = await attendee_svc.delete_attendee(att.id)
+        return f"已删除参会者 {name}" if ok else f"删除 {name} 失败"
+
+    @tool
+    async def delete_all_attendees(confirm: bool = False) -> str:
+        """**清空当前活动的所有参会者**（不可恢复）。座位布局保留，所有人变未分配。
+
+        必须设置 confirm=True 才会真删 — 这是给你（LLM）一个反思缓冲：
+        在用户明确说"删除所有"/"清空"/"重新导入"之类意图后再 confirm。
+
+        Args:
+            confirm: True 才执行删除；False（默认）只返回当前人数，不动数据
+        """
+        attendees = await attendee_svc.list_attendees_for_event(eid)
+        n = len(attendees)
+        if n == 0:
+            return "当前活动没有参会者，无需删除"
+        if not confirm:
+            return (
+                f"⚠️ 当前有 {n} 位参会者，未删除。"
+                "如确认要清空，请再次调用并设 confirm=True。"
+            )
+        deleted = await attendee_svc.delete_all_for_event(eid)
+        return f"✅ 已清空 {deleted} 位参会者；座位仍在但全部变为未分配"
+
+    @tool
+    async def regenerate_roster_from_excel(
+        column_mapping_hint: str = "",
+        default_role: str = "参会者",
+        confirm: bool = False,
+    ) -> str:
+        """**重新生成参会者名单**：清空旧名单 → 用 LLM 解析 Excel → 重新导入。
+
+        用户说"重新生成参会人"/"重新导入名单"/"清掉再导一遍"时调用本工具。
+        原子操作：先清空，再重新解析当前活动最近一份 Excel（同
+        smart_import_roster 的 LLM 拆字段流程）。
+
+        Args:
+            column_mapping_hint: 给解析 LLM 的列含义提示（同 smart_import_roster）
+            default_role: 默认角色
+            confirm: True 才执行；False 只汇报会做什么
+        """
+        if llm_factory is None:
+            return "❌ 没有 LLM 工厂，无法运行重新生成。"
+        from tools.event_files import find_latest_file_by_type
+        entry = find_latest_file_by_type(event_id, "excel")
+        if not entry:
+            return "❌ 本活动没有上传过 Excel 文件，无法重新生成"
+
+        existing = await attendee_svc.list_attendees_for_event(eid)
+        n_old = len(existing)
+        if not confirm:
+            return (
+                f"⚠️ 即将清空 {n_old} 位旧参会者并从 "
+                f"《{entry.get('filename', 'Excel')}》重新导入。"
+                "如确认请再次调用并设 confirm=True。"
+            )
+
+        deleted = await attendee_svc.delete_all_for_event(eid)
+        # Re-run the smart import flow with the same closure-bound tool
+        sub_result = await smart_import_roster.ainvoke({
+            "column_mapping_hint": column_mapping_hint,
+            "default_role": default_role,
+        })
+        return (
+            f"✅ 重新生成完成：清空旧 {deleted} 人 → 重新导入 → {sub_result}"
+        )
+
     # ── Structured seat-chart import ─────────────────────────
     @tool
     async def analyze_seat_chart() -> str:
@@ -1166,6 +1249,7 @@ def make_seating_tools(
         read_event_excel,
         inspect_excel,
         smart_import_roster,
+        regenerate_roster_from_excel,
         suggest_venue_dims,
         analyze_seat_chart,
         import_from_seat_chart,
@@ -1175,6 +1259,8 @@ def make_seating_tools(
         swap_two_attendees,
         reassign_attendee_seat,
         unassign_attendee,
+        delete_attendee_by_name,
+        delete_all_attendees,
         list_areas,
         create_area,
         generate_area_layout,

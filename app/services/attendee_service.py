@@ -58,3 +58,13 @@ class AttendeeService:
         """Delete an attendee."""
         attendee = await self.get_attendee(attendee_id)
         return await self._repo.delete(attendee_id)
+
+    async def delete_all_for_event(self, event_id: uuid.UUID) -> int:
+        """Delete every attendee for an event. Returns count removed.
+
+        Used by the agent's `delete_all_attendees` and
+        `regenerate_roster_from_excel` tools when the user wants a clean
+        slate before re-importing. Seats are unassigned (kept) — only the
+        attendee rows go away.
+        """
+        return await self._repo.delete_all_for_event(event_id)

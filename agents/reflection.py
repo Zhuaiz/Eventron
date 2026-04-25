@@ -138,6 +138,28 @@ async def validate_seating_result(
         suggestions.append("应调用 create_layout 或 auto_assign")
         score -= 0.3
 
+    # Hallucination guard for destructive operations: agent claimed it
+    # deleted/cleared something without calling the matching tool.
+    delete_kws = ("已删除", "已清空", "已清除", "已删完", "全部删除", "已重新生成")
+    delete_tools = {
+        "delete_attendee_by_name",
+        "delete_all_attendees",
+        "regenerate_roster_from_excel",
+        "delete_area",
+    }
+    called = {tc.get("tool_name") for tc in tool_calls}
+    if any(kw in reply for kw in delete_kws) and not (called & delete_tools):
+        issues.append(
+            "回复声称完成了删除/清空操作，但没有调用 delete_* / "
+            "regenerate_roster_from_excel — 严重幻觉"
+        )
+        suggestions.append(
+            "如果用户要删除参会者，调 delete_all_attendees(confirm=True) "
+            "或 delete_attendee_by_name；要重新生成调 "
+            "regenerate_roster_from_excel(confirm=True)。"
+        )
+        score -= 0.5
+
     return ReflectionResult(
         passed=len(issues) == 0,
         score=max(0.0, score),

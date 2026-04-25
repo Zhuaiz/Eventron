@@ -2,12 +2,13 @@
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.models.attendee import Attendee
 from app.models.event import Event
+from app.models.seat import Seat
 from app.repositories.base import BaseRepository
 
 
@@ -99,3 +100,26 @@ class AttendeeRepository(BaseRepository[Attendee]):
         )
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def delete_all_for_event(self, event_id: uuid.UUID) -> int:
+        """Delete every attendee for an event.
+
+        Also unassigns any seats they occupied so the layout remains intact
+        but every seat goes back to "empty". Returns the count deleted.
+        """
+        # First clear seat→attendee FKs for this event so the delete cascade
+        # doesn't leave dangling references on the seat table.
+        unassign = (
+            update(Seat)
+            .where(Seat.event_id == event_id)
+            .where(Seat.attendee_id.is_not(None))
+            .values(attendee_id=None)
+        )
+        await self._session.execute(unassign)
+
+        stmt = (
+            delete(Attendee).where(Attendee.event_id == event_id)
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return int(result.rowcount or 0)

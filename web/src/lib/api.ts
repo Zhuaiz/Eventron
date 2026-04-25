@@ -99,6 +99,74 @@ export interface LLMProviderPatch {
   provider?: string;
 }
 
+/**
+ * Build a friendly error message from a non-OK Response. Handles three
+ * cases that show up in production:
+ *   - JSON error body  → `{detail}` field, fall back to `message`
+ *   - HTML error page  → nginx 502/504 / Cloudflare style; we get back
+ *     `<html>...</html>` and the old code crashed parsing it as JSON
+ *   - empty body       → use the status code label
+ *
+ * Never throws — returns a string the caller can rethrow.
+ */
+async function readErrorMessage(
+  response: Response,
+  status: number,
+): Promise<string> {
+  const fallback = `HTTP ${status}`;
+  let raw = '';
+  try {
+    raw = await response.text();
+  } catch {
+    return fallback;
+  }
+  if (!raw.trim()) return fallback;
+
+  const ct = (response.headers.get('content-type') || '').toLowerCase();
+  if (ct.includes('application/json')) {
+    try {
+      const parsed = JSON.parse(raw) as ApiError;
+      return parsed.detail || parsed.message || fallback;
+    } catch {
+      // fall through
+    }
+  }
+
+  // HTML page (nginx/cloudflare error) — surface a clean message
+  if (raw.trimStart().startsWith('<')) {
+    if (status === 502) return '服务暂时不可达 (502)，后端可能在重启';
+    if (status === 504) return '请求超时 (504)，后端处理时间过长';
+    if (status >= 500) return `服务异常 (${status})，请稍后重试`;
+    return fallback;
+  }
+
+  // Plain-text body — return up to 200 chars
+  return raw.slice(0, 200) || fallback;
+}
+
+/**
+ * Parse a successful Response as JSON, but never let a stray HTML
+ * heartbeat or whitespace blow up `JSON.parse`. Returns the parsed
+ * object on success; throws a descriptive error otherwise.
+ */
+async function safeJson<T = unknown>(
+  response: Response,
+  context: string,
+): Promise<T> {
+  const raw = await response.text();
+  if (!raw.trim()) {
+    throw new Error(`${context}: empty response body`);
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    const head = raw.trimStart().slice(0, 60);
+    throw new Error(
+      `${context}: 响应不是合法 JSON（前 60 字符: ${head}...）`,
+    );
+  }
+}
+
 export class ApiClient {
   private getToken(): string | null {
     return localStorage.getItem('token');
@@ -494,10 +562,9 @@ export class ApiClient {
       throw new Error('登录已失效，请刷新页面后重试');
     }
     if (!response.ok) {
-      const err = (await response.json()) as ApiError;
-      throw new Error(err.detail || 'Chat error');
+      throw new Error(await readErrorMessage(response, response.status));
     }
-    return response.json();
+    return safeJson(response, 'agent chat');
   }
 
   /**
@@ -538,7 +605,7 @@ export class ApiClient {
       throw new Error('登录已失效，请刷新页面后重试');
     }
     if (!response.ok) {
-      throw new Error('Stream error');
+      throw new Error(await readErrorMessage(response, response.status));
     }
 
     const reader = response.body?.getReader();
