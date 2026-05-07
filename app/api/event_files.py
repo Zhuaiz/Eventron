@@ -50,6 +50,63 @@ INLINE_CONTENT_TYPES = {
     "application/pdf",
 }
 
+# Image content types we can resize via Pillow.
+_RESIZABLE_IMAGE_TYPES = {
+    "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp",
+}
+
+
+def _resized_path(src: Path, max_dim: int) -> Path:
+    """Return a path under .cache/ that holds the same image scaled so
+    neither dimension exceeds ``max_dim``. Aspect preserved, no upscaling.
+
+    Generation is lazy — first request resizes and caches; subsequent
+    requests serve the cached file directly. Re-encoded for compactness:
+    JPEG q=85, PNG with optimize=True. GIF/BMP fall through to original
+    (rare path; not worth the complexity to re-encode).
+    """
+    from PIL import Image
+
+    cache_dir = src.parent / ".cache"
+    suffix = src.suffix.lower()
+    cache_path = cache_dir / f"{src.stem}_w{max_dim}{suffix}"
+    if cache_path.exists():
+        return cache_path
+
+    try:
+        with Image.open(src) as im:
+            ow, oh = im.size
+            if max(ow, oh) <= max_dim:
+                # Already small enough — never upscale.
+                return src
+
+            if ow >= oh:
+                new_w = max_dim
+                new_h = round(oh * (max_dim / ow))
+            else:
+                new_h = max_dim
+                new_w = round(ow * (max_dim / oh))
+
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            resized = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            if suffix in (".jpg", ".jpeg"):
+                if resized.mode != "RGB":
+                    resized = resized.convert("RGB")
+                resized.save(cache_path, "JPEG", quality=85, optimize=True)
+            elif suffix == ".png":
+                resized.save(cache_path, "PNG", optimize=True)
+            elif suffix == ".webp":
+                resized.save(cache_path, "WEBP", quality=85)
+            else:
+                # GIF/BMP — just save as-is at the new size.
+                resized.save(cache_path)
+    except Exception:
+        # Any decode/encode failure → fall back to original.
+        return src
+
+    return cache_path
+
 
 @router.post("/events/{event_id}/files")
 async def upload_event_file(
@@ -132,6 +189,15 @@ async def get_event_file(
     event_id: uuid.UUID,
     file_id: str,
     download: bool = Query(False, description="Force download instead of inline preview"),
+    w: int | None = Query(
+        None, ge=16, le=4096,
+        description=(
+            "For images: cap longer side to this many pixels (preserves"
+            " aspect, never upscales). Useful when embedding the image"
+            " on a mobile page — pass w=1080 to avoid downloading the"
+            " full-resolution original."
+        ),
+    ),
 ):
     """Download/view a specific event file.
 
@@ -155,6 +221,12 @@ async def get_event_file(
     media_type = entry.get("content_type", "application/octet-stream")
     filename = entry["filename"]
     encoded = quote(filename)
+
+    # On-the-fly resize: only for image content with ?w= specified.
+    # Keeps the URL stable (file_id) while letting consumers ask for the
+    # version that fits their viewport. Cached on disk under .cache/.
+    if w and media_type in _RESIZABLE_IMAGE_TYPES:
+        filepath = _resized_path(filepath, w)
 
     # Inline preview for images / PDFs; attachment for everything else.
     if not download and media_type in INLINE_CONTENT_TYPES:
