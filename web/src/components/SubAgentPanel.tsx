@@ -246,6 +246,13 @@ export function SubAgentPanel({
     setStreamingTools([]);
     setThinkingStep(0);
 
+    // Track whether SSE already delivered a final answer. If yes, the catch
+    // block must NOT re-fire the request via the JSON fallback — that's
+    // what produced the "reply shows up twice" bug: SSE done added one
+    // message, then a stray post-stream throw triggered a second backend
+    // round-trip that added another (identical) message.
+    let doneReceived = false;
+
     try {
       const stream = apiClient.streamAgentChat(
         msg.trim() || '请分析这些文件',
@@ -292,6 +299,7 @@ export function SubAgentPanel({
             break;
 
           case 'done': {
+            doneReceived = true;
             setSessionId(evt.session_id || sessionId);
             const rawQr = (evt.quick_replies || []) as QuickReplyData[];
             const choices = rawQr.length > 0 ? undefined : parseChoices(evt.reply || '') || undefined;
@@ -319,6 +327,7 @@ export function SubAgentPanel({
           }
 
           case 'error':
+            doneReceived = true;  // server-reported error is also "final"
             setMessages((prev) => [
               ...prev,
               { role: 'assistant', content: `**出错了：** ${evt.message || '请重试'}` },
@@ -327,6 +336,13 @@ export function SubAgentPanel({
         }
       }
     } catch (err) {
+      // If SSE already delivered the final answer, ignore post-done errors —
+      // the for-await sometimes throws on stream close behind nginx/cloudflare
+      // even after we've gotten a clean done event. Re-firing the request
+      // here would double-bill the LLM call AND post a duplicate message.
+      if (doneReceived) {
+        // swallow; the answer is already on screen
+      } else {
       // SSE failed — fall back to regular endpoint
       try {
         const data = await apiClient.sendAgentChat(
@@ -356,6 +372,7 @@ export function SubAgentPanel({
           ...prev,
           { role: 'assistant', content: `**出错了：** ${fallbackErr instanceof Error ? fallbackErr.message : '请重试'}` },
         ]);
+      }
       }
     } finally {
       setIsStreaming(false);
