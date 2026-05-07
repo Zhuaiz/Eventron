@@ -161,6 +161,79 @@ class CheckinService:
             for a in matches
         ]
 
+    async def lookup_by_name(
+        self, event_id: uuid.UUID, name: str,
+    ) -> dict:
+        """Look up an attendee by name **without** checking in.
+
+        Drives the 2-step UX: lookup returns the match (badge / seat / status),
+        the page shows it for review, then the user clicks 簽到 → ``/confirm``
+        endpoint actually marks them checked-in via ``checkin``.
+
+        The internal check-in business logic (state machine, DB writes) is
+        intentionally untouched — this method is read-only and just shapes the
+        same fuzzy/pinyin match as ``checkin_by_name`` into a review payload.
+
+        Returns one of:
+            ``{"status": "found", "attendee_id": ..., "attendee_name": ...,
+              "seat_label": ..., "seat_zone": ..., "title": ...,
+              "organization": ..., "attrs": {...}}``
+            ``{"status": "already", "attendee_id": ..., "attendee_name": ...,
+              "seat_label": ...}``
+            ``{"status": "ambiguous", "candidates": [...]}``
+            ``{"status": "not_found", "message": "..."}``
+        """
+        matches = await self._attendee_repo.fuzzy_match_by_name(
+            event_id, name,
+        )
+        if not matches and _is_ascii(name):
+            all_attendees = await self._attendee_repo.get_by_event(event_id)
+            matches = [
+                a for a in all_attendees
+                if a.status not in ("cancelled",)
+                and _pinyin_match(name, a.name)
+            ]
+
+        if not matches:
+            return {
+                "status": "not_found",
+                "message": f"未找到「{name}」，请确认姓名后重试",
+            }
+
+        if len(matches) > 1:
+            return {
+                "status": "ambiguous",
+                "candidates": [
+                    {
+                        "attendee_id": str(a.id),
+                        "name": a.name,
+                        "title": a.title,
+                        "organization": a.organization,
+                    }
+                    for a in matches
+                ],
+            }
+
+        # Unique match — read-only review payload.
+        attendee = matches[0]
+        seat = await self._seat_repo.get_by_attendee(attendee.id)
+
+        base = {
+            "attendee_id": str(attendee.id),
+            "attendee_name": attendee.name,
+            "title": attendee.title,
+            "organization": attendee.organization,
+            "seat_label": seat.label if seat else None,
+            "seat_zone": seat.zone if seat else None,
+            "attrs": attendee.attrs or {},
+        }
+        if attendee.status == "cancelled":
+            return {**base, "status": "cancelled",
+                    "message": f"{attendee.name} 已取消报名"}
+        if attendee.status == "checked_in":
+            return {**base, "status": "already"}
+        return {**base, "status": "found"}
+
     async def suggest_by_name(
         self, event_id: uuid.UUID, name: str, limit: int = 8,
     ) -> list[dict]:

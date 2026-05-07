@@ -1,20 +1,57 @@
-/* ─── H5 Check-in Page — Interactive Logic ─── */
+/* ─── H5 Check-in Page — Interactive Logic (2-step flow) ─── */
 /* Injected by Jinja2 into checkin.html via {{ js }} */
-/* EVENT_ID is set in a separate <script> tag before this runs. */
+/* EVENT_ID is set in a separate <script> tag before this runs.
+
+   Flow:
+     1. User types name, clicks the search button (#search-btn → doSearch)
+     2. /checkin/lookup runs (no side effects). UI:
+        - found  → fill #name-display / #seat-display / #zone-display,
+                   stash attendee_id on #confirm-btn, show #confirm-btn
+        - already → fill the same display fields and show #confirm-btn
+                   disabled with "已签到" text (still informative)
+        - ambiguous → render #candidates-list, user picks one
+        - not_found → toast
+     3. User clicks #confirm-btn → /checkin/confirm/{attendee_id} actually
+        checks in. UI flips to success state.
+
+   The internal check-in business logic (CheckinService.checkin, DB state
+   machine) is unchanged — /confirm/{aid} still performs it. We only added
+   the read-only /lookup step in front. Old /search endpoint remains for
+   any callers; the page no longer hits it.
+
+   Element contract — gen prompt enforces these IDs but custom layouts
+   may freely add wrappers, decoration, classes:
+     #name-input        text input
+     #search-btn        triggers doSearch()
+     #confirm-btn       triggers doConfirm() (initially hidden)
+     #result-section    wrapper for the populated info card (initially hidden)
+     #name-display      filled with attendee name
+     #seat-display      filled with seat label (or "未分配")
+     #zone-display      (optional) filled with zone name
+     #candidates-section + #candidates-list   for ambiguous matches
+     #success-section + #success-name + #success-msg + #seat-info + #seat-label
+                         final post-confirm state
+     #stat-total / #stat-checked / #stat-rate  (optional) live stats
+*/
 
 var API_BASE = window.location.origin + "/p/" + EVENT_ID + "/checkin";
 
-/* ── Sections ── */
-var searchSection = document.getElementById("search-section");
-var resultSection = document.getElementById("result-section");
+/* ── Resolve elements (defensive — model may omit optional ones) ── */
+var nameInput        = document.getElementById("name-input");
+var searchBtn        = document.getElementById("search-btn");
+var confirmBtn       = document.getElementById("confirm-btn");
+var resultSection    = document.getElementById("result-section");
 var candidatesSection = document.getElementById("candidates-section");
-var successSection = document.getElementById("success-section");
-var nameInput = document.getElementById("name-input");
-var searchBtn = document.getElementById("search-btn");
+var successSection   = document.getElementById("success-section");
 
-/* ── Helpers ── */
-function show(el) { el.style.display = ""; }
-function hide(el) { el.style.display = "none"; }
+/* ── Tiny helpers ──────────────────────────────────────────────── */
+function $(id) { return document.getElementById(id); }
+function show(el) { if (el) el.style.display = ""; }
+function hide(el) { if (el) el.style.display = "none"; }
+function setText(id, text) {
+  var el = $(id);
+  if (el) el.textContent = text == null ? "" : String(text);
+}
 
 function showToast(msg) {
   var t = document.createElement("div");
@@ -25,18 +62,31 @@ function showToast(msg) {
 }
 
 function setLoading(btn, loading) {
+  if (!btn) return;
   if (loading) {
+    btn.disabled = true;
     btn.classList.add("loading");
-    btn.dataset.origText = btn.textContent;
+    if (!btn.dataset.origText) btn.dataset.origText = btn.textContent;
     btn.textContent = "请稍候...";
   } else {
+    btn.disabled = false;
     btn.classList.remove("loading");
-    btn.textContent = btn.dataset.origText || btn.textContent;
+    if (btn.dataset.origText) {
+      btn.textContent = btn.dataset.origText;
+      delete btn.dataset.origText;
+    }
   }
 }
 
-/* ── Search ── */
+function escHtml(s) {
+  var d = document.createElement("div");
+  d.textContent = s == null ? "" : String(s);
+  return d.innerHTML;
+}
+
+/* ── Step 1: lookup (no check-in side effect) ─────────────────── */
 function doSearch() {
+  if (!nameInput) return;
   var name = nameInput.value.trim();
   if (!name) {
     showToast("请输入姓名");
@@ -44,12 +94,14 @@ function doSearch() {
     return;
   }
 
+  hideSuggestions();
   setLoading(searchBtn, true);
   hide(resultSection);
   hide(candidatesSection);
   hide(successSection);
+  hide(confirmBtn);
 
-  fetch(API_BASE + "/search", {
+  fetch(API_BASE + "/lookup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: name }),
@@ -57,18 +109,17 @@ function doSearch() {
     .then(function (r) { return r.json(); })
     .then(function (data) {
       setLoading(searchBtn, false);
-      handleSearchResult(data);
+      handleLookupResult(data);
     })
-    .catch(function (err) {
+    .catch(function () {
       setLoading(searchBtn, false);
       showToast("网络错误，请重试");
     });
 }
 
-function handleSearchResult(data) {
-  if (data.status === "success" || data.status === "already") {
-    showSuccess(data);
-    refreshStats();
+function handleLookupResult(data) {
+  if (data.status === "found" || data.status === "already") {
+    populateMatch(data);
     return;
   }
 
@@ -79,22 +130,73 @@ function handleSearchResult(data) {
 
   if (data.status === "not_found") {
     showToast(data.message || "未找到该人员");
-    nameInput.select();
+    if (nameInput) nameInput.select();
     return;
   }
 
-  showToast(data.message || "操作失败");
+  if (data.status === "cancelled") {
+    showToast(data.message || "该人员已取消报名");
+    return;
+  }
+
+  showToast(data.message || "查询失败");
 }
 
-/* ── Disambiguation: show candidate list ── */
+/* Fill the info card with the matched attendee + reveal it.
+   Keeps confirm-btn hidden (and disabled with "已签到" label) when the
+   attendee is already checked in, so the UI is informative without
+   tempting a redundant tap. */
+function populateMatch(data) {
+  setText("name-display", data.attendee_name || "");
+  setText("seat-display", data.seat_label || "未分配");
+  setText("zone-display", data.seat_zone || "");
+  setText("title-display", data.title || "");
+  setText("organization-display", data.organization || "");
+
+  // attrs.* — let templates display arbitrary fields (e.g. badge_number)
+  if (data.attrs && typeof data.attrs === "object") {
+    Object.keys(data.attrs).forEach(function (k) {
+      setText("attr-" + k, data.attrs[k]);
+    });
+  }
+
+  show(resultSection);
+  hide(candidatesSection);
+  hide(successSection);
+
+  if (confirmBtn) {
+    if (data.status === "already") {
+      confirmBtn.disabled = true;
+      confirmBtn.dataset.attendeeId = "";
+      if (!confirmBtn.dataset.origText) {
+        confirmBtn.dataset.origText = confirmBtn.textContent;
+      }
+      confirmBtn.textContent = "已签到";
+      show(confirmBtn);
+    } else {
+      confirmBtn.disabled = false;
+      confirmBtn.dataset.attendeeId = data.attendee_id || "";
+      if (confirmBtn.dataset.origText) {
+        confirmBtn.textContent = confirmBtn.dataset.origText;
+      }
+      show(confirmBtn);
+    }
+  }
+}
+
+/* ── Disambiguation: pick a candidate ─────────────────────────── */
 function showCandidates(candidates) {
-  var list = document.getElementById("candidates-list");
+  var list = $("candidates-list");
+  if (!list) {
+    showToast("找到多位同名人员，请输入更完整的姓名");
+    return;
+  }
   list.innerHTML = "";
 
   candidates.forEach(function (c) {
     var div = document.createElement("div");
     div.className = "cand-item";
-    div.onclick = function () { confirmCheckin(c.attendee_id); };
+    div.onclick = function () { selectCandidate(c); };
 
     var initial = (c.name || "?").charAt(0);
     var detail = [];
@@ -102,7 +204,7 @@ function showCandidates(candidates) {
     if (c.organization) detail.push(c.organization);
 
     div.innerHTML =
-      '<div class="cand-avatar">' + initial + "</div>" +
+      '<div class="cand-avatar">' + escHtml(initial) + "</div>" +
       '<div class="cand-info">' +
       '<div class="cand-name">' + escHtml(c.name) + "</div>" +
       (detail.length
@@ -116,94 +218,139 @@ function showCandidates(candidates) {
 
   hide(resultSection);
   hide(successSection);
+  hide(confirmBtn);
   show(candidatesSection);
 }
 
-/* ── Confirm check-in (by attendee_id) ── */
-function confirmCheckin(attendeeId) {
-  // Disable candidate list while loading
-  var items = document.querySelectorAll(".cand-item");
-  items.forEach(function (el) { el.style.pointerEvents = "none"; el.style.opacity = "0.6"; });
+/* When user picks a candidate, do a follow-up lookup with their full
+   name so the same review-then-confirm flow runs (instead of jumping
+   straight to check-in). */
+function selectCandidate(c) {
+  if (nameInput) nameInput.value = c.name;
+  hide(candidatesSection);
+  // Reuse lookup directly with the attendee_id to skip another fuzzy match
+  fetch(API_BASE + "/lookup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: c.name }),
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      // If still ambiguous (rare — same name twice in the list), fall back
+      // to confirming the picked attendee_id directly.
+      if (data.status === "ambiguous") {
+        directLookupById(c);
+      } else {
+        handleLookupResult(data);
+      }
+    })
+    .catch(function () { directLookupById(c); });
+}
 
-  fetch(API_BASE + "/confirm/" + attendeeId, {
+function directLookupById(c) {
+  // No /lookup-by-id endpoint — synthesise a "found" payload with whatever
+  // we know, then let confirm hit /confirm/{aid}. Seat info will be empty
+  // until the page polls again, but the confirm flow still works.
+  populateMatch({
+    status: "found",
+    attendee_id: c.attendee_id,
+    attendee_name: c.name,
+    title: c.title,
+    organization: c.organization,
+  });
+}
+
+/* ── Step 2: confirm (actually check in) ──────────────────────── */
+function doConfirm() {
+  if (!confirmBtn) return;
+  var aid = confirmBtn.dataset.attendeeId;
+  if (!aid) {
+    showToast("请先搜索姓名");
+    return;
+  }
+
+  setLoading(confirmBtn, true);
+
+  fetch(API_BASE + "/confirm/" + aid, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   })
     .then(function (r) { return r.json(); })
     .then(function (data) {
+      setLoading(confirmBtn, false);
       if (data.status === "success" || data.status === "already") {
         showSuccess(data);
         refreshStats();
       } else {
         showToast(data.message || "签到失败");
-        items.forEach(function (el) { el.style.pointerEvents = ""; el.style.opacity = ""; });
       }
     })
     .catch(function () {
+      setLoading(confirmBtn, false);
       showToast("网络错误，请重试");
-      items.forEach(function (el) { el.style.pointerEvents = ""; el.style.opacity = ""; });
     });
 }
 
-/* ── Show success ── */
+/* ── Final success state ──────────────────────────────────────── */
 function showSuccess(data) {
-  document.getElementById("success-name").textContent = data.attendee_name || "";
-  document.getElementById("success-msg").textContent =
-    data.status === "already" ? "您已签到过" : "签到成功！";
+  setText("success-name", data.attendee_name || "");
+  setText(
+    "success-msg",
+    data.status === "already" ? "您已签到过" : "签到成功！",
+  );
 
-  var seatInfo = document.getElementById("seat-info");
-  if (data.seat_label) {
-    document.getElementById("seat-label").textContent =
-      "您的座位：" + data.seat_label;
-    show(seatInfo);
-  } else {
-    hide(seatInfo);
+  var seatInfo = $("seat-info");
+  if (seatInfo) {
+    if (data.seat_label) {
+      setText("seat-label", "您的座位：" + data.seat_label);
+      show(seatInfo);
+    } else {
+      hide(seatInfo);
+    }
   }
 
-  hide(searchSection);
   hide(resultSection);
   hide(candidatesSection);
+  hide(confirmBtn);
   show(successSection);
 }
 
-/* ── Reset ── */
 function resetPage() {
-  nameInput.value = "";
+  if (nameInput) nameInput.value = "";
   hide(resultSection);
   hide(candidatesSection);
   hide(successSection);
-  show(searchSection);
-  nameInput.focus();
+  hide(confirmBtn);
+  if (nameInput) nameInput.focus();
 }
 
-/* ── Refresh stats ── */
+/* ── Stats polling (optional UI) ──────────────────────────────── */
 function refreshStats() {
   fetch(API_BASE + "/stats")
     .then(function (r) { return r.json(); })
     .then(function (s) {
-      document.getElementById("stat-total").textContent = s.total;
-      document.getElementById("stat-checked").textContent = s.checked_in;
-      document.getElementById("stat-rate").textContent = s.rate + "%";
+      setText("stat-total", s.total);
+      setText("stat-checked", s.checked_in);
+      setText("stat-rate", s.rate + "%");
     })
     .catch(function () {});
 }
-
-/* ── Poll stats every 15s ── */
 setInterval(refreshStats, 15000);
 
-/* ── Enter key to search ── */
-nameInput.addEventListener("keydown", function (e) {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    hideSuggestions();
-    doSearch();
-  }
-  if (e.key === "Escape") {
-    hideSuggestions();
-  }
-});
+/* ── Keyboard: Enter triggers search ──────────────────────────── */
+if (nameInput) {
+  nameInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      hideSuggestions();
+      doSearch();
+    } else if (e.key === "Escape") {
+      hideSuggestions();
+    }
+  });
+}
 
-/* ── Live autocomplete suggestions ── */
+/* ── Live autocomplete suggestions ────────────────────────────── */
 var suggestBox = document.createElement("div");
 suggestBox.id = "suggest-box";
 suggestBox.style.cssText =
@@ -211,20 +358,20 @@ suggestBox.style.cssText =
   "background:#fff;border:1px solid #d1d5db;border-top:none;" +
   "border-radius:0 0 12px 12px;max-height:200px;overflow-y:auto;" +
   "box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:50;";
-// Attach to input wrapper
-var inputWrapper = nameInput.parentElement;
-if (inputWrapper) {
-  inputWrapper.style.position = "relative";
-  inputWrapper.appendChild(suggestBox);
+if (nameInput && nameInput.parentElement) {
+  nameInput.parentElement.style.position = "relative";
+  nameInput.parentElement.appendChild(suggestBox);
 }
 
 var suggestTimer = null;
-nameInput.addEventListener("input", function () {
-  clearTimeout(suggestTimer);
-  var q = nameInput.value.trim();
-  if (q.length < 1) { hideSuggestions(); return; }
-  suggestTimer = setTimeout(function () { fetchSuggestions(q); }, 250);
-});
+if (nameInput) {
+  nameInput.addEventListener("input", function () {
+    clearTimeout(suggestTimer);
+    var q = nameInput.value.trim();
+    if (q.length < 1) { hideSuggestions(); return; }
+    suggestTimer = setTimeout(function () { fetchSuggestions(q); }, 250);
+  });
+}
 
 function fetchSuggestions(q) {
   fetch(API_BASE + "/suggest", {
@@ -258,13 +405,13 @@ function showSuggestions(items) {
     if (c.organization) detail.push(c.organization);
 
     div.innerHTML =
-      '<span style="font-weight:600;color:#1e293b;">' + escHtml(c.name) + '</span>' +
+      '<span style="font-weight:600;color:#1e293b;">' + escHtml(c.name) + "</span>" +
       (detail.length
-        ? '<span style="font-size:12px;color:#94a3b8;">' + escHtml(detail.join(" · ")) + '</span>'
-        : '');
+        ? '<span style="font-size:12px;color:#94a3b8;">' + escHtml(detail.join(" · ")) + "</span>"
+        : "");
 
     div.onclick = function () {
-      nameInput.value = c.name;
+      if (nameInput) nameInput.value = c.name;
       hideSuggestions();
       doSearch();
     };
@@ -275,16 +422,8 @@ function showSuggestions(items) {
 
 function hideSuggestions() { suggestBox.style.display = "none"; }
 
-/* Close suggestions on outside click */
 document.addEventListener("click", function (e) {
   if (e.target !== nameInput && !suggestBox.contains(e.target)) {
     hideSuggestions();
   }
 });
-
-/* ── Escape HTML ── */
-function escHtml(s) {
-  var d = document.createElement("div");
-  d.textContent = s || "";
-  return d.innerHTML;
-}

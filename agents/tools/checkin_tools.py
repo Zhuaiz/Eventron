@@ -61,46 +61,65 @@ maximum-scale=1.0, user-scalable=no">
 </html>
 ```
 
-## 必须包含的 HTML 元素（签到 JS 依赖这些 ID）
-在 <body> 中必须包含以下结构（可调整样式、class、顺序，但 ID 必须保留）:
+## 用户流程（两步：先查询，再确认签到）
+真正驱动这个页面的 JS 已经写好，会自动注入。流程如下：
+  1. 用户输入姓名 → 点 #search-btn → JS 调 /lookup（无副作用），\
+取回信息卡数据
+  2. 单匹配：JS 把姓名/席位/区域填进 `#name-display` / `#seat-display` / \
+`#zone-display`，并把 `#result-section` 显示出来、`#confirm-btn` 也显示出来
+  3. 同名匹配：JS 把候选列表填进 `#candidates-list`，用户点击其一
+  4. 用户点 #confirm-btn → JS 调 /confirm/{{attendee_id}} → 真正签到 → \
+显示 `#success-section`
+  5. 已签到：填同样的展示字段，但 #confirm-btn 自动变灰显示"已签到"
 
-1. 搜索区:
-<section id="search-section">
-  <form id="checkin-form" onsubmit="return false;">
-    <input type="text" id="name-input" placeholder="请输入您的姓名" \
-autocomplete="off" autofocus>
-    <button type="button" id="search-btn" onclick="doSearch()">签到</button>
-  </form>
-</section>
+## 必备元素（JS 用 ID 操作；可自由排版/分组/装饰）
+布局完全自由——可以加 logo 区、活动介绍、装饰图、底部插画等等任何区块。\
+JS 只在乎下面这几个 ID 存在且语义对：
 
-2. 结果区（初始隐藏）:
-<section id="result-section" style="display:none;"></section>
+**步骤 1—搜索（必备）**
+- `<input id="name-input">` 姓名输入框
+- `<button id="search-btn" onclick="doSearch()">` 触发查询的按钮（按钮\
+文字自由：搜索/查询/查找席位都行）
 
-3. 同名消歧区（初始隐藏）:
-<section id="candidates-section" style="display:none;">
-  <p>找到多位同名人员，请选择：</p>
-  <div id="candidates-list"></div>
-</section>
+**步骤 2—信息卡（必备）：JS 在 lookup 成功后会填这些字段**
+- `<section id="result-section" style="display:none;">` 信息卡外壳，\
+JS 会把它显示出来；内部布局自由
+- 在信息卡内部任意位置放：
+  - `<span id="name-display"></span>` 姓名
+  - `<span id="seat-display"></span>` 席位号
+  - `<span id="zone-display"></span>` 区域名（可选；活动没分区就空）
 
-4. 签到成功区（初始隐藏）:
-<section id="success-section" style="display:none;">
-  <div class="success-icon">✓</div>
-  <h2 id="success-name"></h2>
-  <p id="success-msg">签到成功</p>
-  <div id="seat-info" style="display:none;">\
-<span id="seat-label"></span></div>
-  <button onclick="resetPage()">返回</button>
-</section>
+**步骤 3—确认签到（必备）：用户审核后点这个按钮**
+- `<button id="confirm-btn" onclick="doConfirm()" style="display:none;">` \
+确认签到按钮（按钮文字自由：签到/确认签到/我要签到都行）。**这是设计上\
+最醒目的 CTA，红色大按钮。**
+
+**步骤 4—成功（必备）**
+- `<section id="success-section" style="display:none;">` 成功区
+  - 内含 `<span id="success-name"></span>` 显示姓名，\
+`<p id="success-msg"></p>` 显示提示
+  - 可选：`<div id="seat-info" style="display:none;">\
+<span id="seat-label"></span></div>` 显示座位
+  - 可加返回按钮 `<button onclick="resetPage()">返回</button>`
+
+**同名消歧（可选）**
+- `<section id="candidates-section" style="display:none;"><div \
+id="candidates-list"></div></section>` —— 加了的话，同名时会显示候选\
+列表；不加的话同名会 toast 提示"输入更完整姓名"
+
+**统计栏（可选）**
+若用户要展示实时签到率，加 `<span id="stat-total"></span>` / \
+`<span id="stat-checked"></span>` / `<span id="stat-rate"></span>`
 
 ## 设计原则
-- 移动端优先（max-width: 440px 居中）
-- 视觉美观，符合现代 H5 签到页设计
-- 活动名称醒目展示
-- 搜索区域突出，输入框和按钮易于点击
-- 丰富的 CSS 样式：渐变背景、圆角、阴影、过渡动画等
-- 如用户没要求统计栏，就不加
-- 将真实活动名称/日期/地点直接写入 HTML
-- 不要写任何 <script>，JS 会由系统自动注入"""
+- **移动端优先**：max-width 约 440px 居中；窄屏下不要溢出
+- 活动名称醒目展示；可加副标题、日期、地点、装饰
+- 信息卡（result-section）是页面的视觉焦点之一——参会者在这里\
+确认是不是自己。配色和参考图保持一致
+- 确认按钮（confirm-btn）是页面 CTA——足够大、配色突出、点击区域舒适
+- 装饰区（背景渐变、纹理、几何线条、城市剪影 SVG 等）大胆加
+- 不要写任何 `<script>`，JS 会由系统自动注入
+- 不要修改上述任何 ID 的拼写——拼错就 JS 找不到、流程跑不通"""
 
 
 def _extract_full_page(text: str) -> str:

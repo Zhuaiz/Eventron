@@ -128,6 +128,52 @@ async def serve_checkin_page(
     return HTMLResponse(html)
 
 
+# ── Lookup (review-then-confirm flow, no side-effects) ─────────
+
+class LookupResult(BaseModel):
+    status: str  # "found" | "already" | "ambiguous" | "not_found" | "cancelled" | "error"
+    message: str | None = None
+    attendee_id: str | None = None
+    attendee_name: str | None = None
+    title: str | None = None
+    organization: str | None = None
+    seat_label: str | None = None
+    seat_zone: str | None = None
+    attrs: dict | None = None
+    candidates: list[CandidateItem] | None = None
+
+
+@router.post("/checkin/lookup", response_model=LookupResult)
+async def lookup_attendee(
+    event_id: uuid.UUID,
+    body: SearchRequest,
+    request: Request,
+    checkin_svc: CheckinService = Depends(get_checkin_service),
+):
+    """Look up an attendee by name **without** checking in.
+
+    Used by the 2-step UI: page calls /lookup → renders match (badge / seat)
+    → user clicks 簽到 → page calls /confirm/{attendee_id} for the actual
+    check-in. The internal check-in logic at /confirm is unchanged.
+    """
+    _check_rate_limit(request, event_id)
+    name = body.name.strip()
+    if not name:
+        return LookupResult(status="error", message="请输入姓名")
+
+    try:
+        result = await checkin_svc.lookup_by_name(event_id, name)
+    except Exception as e:                                       # noqa: BLE001
+        return LookupResult(status="error", message=str(e))
+
+    # Reshape candidates into the typed schema
+    if result.get("candidates"):
+        result["candidates"] = [
+            CandidateItem(**c) for c in result["candidates"]
+        ]
+    return LookupResult(**result)
+
+
 # ── Suggest (autocomplete, no side-effects) ───────────────────
 
 @router.post("/checkin/suggest")
