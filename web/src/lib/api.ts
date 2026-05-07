@@ -318,6 +318,21 @@ export class ApiClient {
     return this.request('GET', `/v1/dashboard/${eventId}`);
   }
 
+  // Custom-page artifact probe (public endpoint, no /api prefix).
+  // Tells the design tab whether a staged page is sitting in front of live.
+  async getCheckinPageStatus(eventId: string): Promise<{
+    has_live: boolean;
+    has_staging: boolean;
+    has_backup: boolean;
+  }> {
+    const r = await fetch(`/p/${eventId}/checkin/page-status`);
+    if (!r.ok) {
+      // Be permissive: a probe failure should not break the design tab.
+      return { has_live: false, has_staging: false, has_backup: false };
+    }
+    return r.json();
+  }
+
   // Import
   async previewImport(eventId: string, file: File) {
     const formData = new FormData();

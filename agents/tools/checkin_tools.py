@@ -34,8 +34,10 @@ _GEN_PROMPT = """\
 - 日期: {event_date}
 - 地点: {event_location}
 
-## 用户设计要求
+## 用户附加要求
 {design_description}
+
+{image_directive}
 
 ## 输出格式
 输出一个完整的 HTML 文件（从 <!DOCTYPE html> 到 </html>），放在一个 ```html 代码块中。
@@ -308,21 +310,34 @@ def make_checkin_tools(
 
     @tool
     async def deploy_custom_checkin_page(
-        design_description: str,
+        extra_requirements: str = "",
     ) -> str:
-        """根据设计描述，自动生成并部署自定义签到页面。
+        """生成并部署自定义签到页（自动使用本活动已上传的参考图）。
 
-        你只需传入简短的设计要求文字描述，工具内部会自动：
-        1. 获取活动信息
-        2. 生成符合要求的 HTML + CSS
-        3. 注入签到交互 JS
-        4. 部署页面
+        ## 工具实际行为（重要）
+        本工具会自动读取本活动文件库中最近上传的参考图（PNG/JPG，最多 2 张），
+        作为视觉风格基准 *直接* 喂给生成模型——生成模型自己看图判断主色、
+        渐变、字体气质、装饰风格等。
+
+        因此 ``extra_requirements`` **不要描述参考图的颜色 / 风格**。
+        曾出现的 bug：用户上传红色图，路由 LLM 转写成"蓝白配色"放进这个参数，
+        生成模型读到文字后输出蓝色页面。
+
+        ## 何时该填什么
+        - 有参考图，用户只说"按这张图设计" → ``extra_requirements=""``
+        - 有参考图，用户额外要求功能改动 →
+            只写功能性改动，例如 ``"去掉底部统计栏"`` /
+            ``"标题字号再大一些"`` / ``"加一个 logo 区域"``
+        - 没有参考图（仅文字描述）→ 这时才完整描述视觉风格，例如
+            ``"深蓝紫渐变背景，标题居中大号，无统计栏，科技感"``
+
+        ## 返回
+        JSON：``status``、``preview_url``、``reference_images_used``
+        （实际使用的参考图数量，可据此向用户确认）、``next_step`` 等。
 
         Args:
-            design_description: 设计要求描述。例如：
-                "深蓝渐变背景，标题醒目居中，去掉底部统计栏，现代简约风"
-                "白色简约风格，logo区域大，搜索框突出"
-                "参考科技感设计，紫色主题，动效背景"
+            extra_requirements: 视觉之外的功能/结构补充。无参考图时改为视觉描述。
+                默认空字符串 = 完全按参考图风格生成。
         """
         from tools.page_render import _load_js
 
@@ -336,26 +351,45 @@ def make_checkin_tools(
         ev = await event_svc.get_event(eid)
         checkin_js = _load_js("checkin")
 
-        # 2. Build generation prompt (multimodal with images)
+        # 2. Load reference images from event file store FIRST so we can
+        #    tailor the prompt depending on whether visuals are available.
+        image_parts = _load_event_images(event_id, max_images=2)
+        n_images = len(image_parts)
+
+        # The gen prompt only needs to know which input is authoritative:
+        # when reference images are present, they outrank any conflicting
+        # text in `extra_requirements`. The tool docstring already steers
+        # the routing LLM to keep `extra_requirements` non-visual, so this
+        # block is just a safety rail for residual cases.
+        if n_images:
+            image_directive = (
+                f"## 视觉基准\n"
+                f"消息开头附带 {n_images} 张用户上传的参考图——"
+                "把它们当作视觉模板直接采用（颜色、渐变、字体气质、装饰）。\n"
+                "上面「用户附加要求」里若出现颜色/风格描述与图冲突，以图为准；"
+                "若是功能/结构性的附加要求（如去掉统计栏、加大字号），保留执行。"
+            )
+        else:
+            image_directive = (
+                "## 视觉基准\n"
+                "本次没有参考图，请按上方「用户附加要求」自由设计。"
+            )
+
         from langchain_core.messages import HumanMessage as HM
         gen_text = _GEN_PROMPT.format(
             event_name=ev.name or "活动",
             event_date=str(ev.event_date) if ev.event_date else "",
             event_location=ev.location or "",
-            design_description=design_description,
+            design_description=extra_requirements or "（无附加要求）",
+            image_directive=image_directive,
         )
 
-        # Load reference images from event file store
-        image_parts = _load_event_images(event_id, max_images=2)
-        if image_parts:
-            # Multimodal message: images + text prompt
+        if n_images:
+            # Multimodal message: images first, then framed text prompt.
             content_parts: list[dict[str, Any]] = list(image_parts)
             content_parts.append({
                 "type": "text",
-                "text": (
-                    "以上是用户上传的参考图片，请参考其视觉风格。\n\n"
-                    + gen_text
-                ),
+                "text": gen_text,
             })
             gen_msg = HM(content=content_parts)
         else:
@@ -432,6 +466,10 @@ def make_checkin_tools(
                         f"hard cap exceeded: {HARD_CAP_SECONDS}s"
                     )
 
+        if n_images:
+            await _push_progress(
+                f"读取到 {n_images} 张参考图，将作为视觉风格基准"
+            )
         await _push_progress("正在调用模型生成页面…")
 
         stream_task = asyncio.create_task(_consume_stream())
@@ -530,13 +568,26 @@ def make_checkin_tools(
         staging_path = upload_dir / "checkin_page_staging.html"
         staging_path.write_text(html, encoding="utf-8")
 
+        if n_images:
+            usage_note = (
+                f"已读取并参考 {n_images} 张用户上传的参考图，"
+                "页面配色与风格基于参考图生成。"
+            )
+        else:
+            usage_note = (
+                "本次没有用户上传的参考图，"
+                "页面基于文字描述生成。如需贴合具体视觉，可上传参考图后重新生成。"
+            )
+
         return json.dumps({
             "status": "ok",
             "message": (
                 "签到页已生成到预览区（尚未上线）。"
+                f"{usage_note}"
                 "请在预览中确认效果，满意后调用 confirm_staged_page 正式部署。"
                 "如需重新生成，可再次调用本工具。"
             ),
+            "reference_images_used": n_images,
             "preview_url": f"/p/{event_id}/checkin?preview=staging",
             "next_step": "confirm_staged_page",
             "size_bytes": len(html.encode()),

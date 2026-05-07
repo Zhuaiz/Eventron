@@ -31,7 +31,6 @@ export function CheckinDesignTab({ eventId }: CheckinDesignTabProps) {
   // Use VITE_PUBLIC_URL for production domain, fallback to current origin
   const publicBase = import.meta.env.VITE_PUBLIC_URL || window.location.origin;
   const checkinUrl = `${publicBase}/p/${eventId}/checkin`;
-  const iframeSrc = `/p/${eventId}/checkin`;
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(checkinUrl)}`;
 
   const { data: stats } = useQuery({
@@ -39,6 +38,24 @@ export function CheckinDesignTab({ eventId }: CheckinDesignTabProps) {
     queryFn: () => apiClient.getDashboard(eventId) as Promise<DashboardStats>,
     refetchInterval: 10000,
   });
+
+  // Custom-page artifact status — drives whether the iframe shows the staged
+  // (not-yet-live) version or live. SubAgentPanel invalidates this query
+  // after every chat turn so the iframe flips to staging the moment the AI
+  // generates a new preview.
+  const { data: pageStatus } = useQuery({
+    queryKey: ['checkin-page-status', eventId],
+    queryFn: () => apiClient.getCheckinPageStatus(eventId),
+    refetchInterval: 5000,
+  });
+
+  const hasStaging = !!pageStatus?.has_staging;
+  // When a staged page exists, point the preview iframe at it. The live URL
+  // (and the QR/copy/外链 buttons) keep targeting live so attendees never see
+  // a half-baked design.
+  const iframeSrc = hasStaging
+    ? `/p/${eventId}/checkin?preview=staging`
+    : `/p/${eventId}/checkin`;
 
   const copyLink = () => {
     navigator.clipboard.writeText(checkinUrl).then(() => {
@@ -148,6 +165,21 @@ export function CheckinDesignTab({ eventId }: CheckinDesignTabProps) {
             <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
               <Smartphone size={16} className="text-indigo-600" />
               签到页预览
+              {hasStaging ? (
+                <span
+                  title="AI 生成的新设计正在预览中。让 AI 助手「确认上线」后参会者才看得到。"
+                  className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 border border-amber-200"
+                >
+                  暂存预览（未上线）
+                </span>
+              ) : (
+                <span
+                  title="参会者扫码看到的就是这个版本。"
+                  className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"
+                >
+                  已上线
+                </span>
+              )}
             </h3>
             <button onClick={() => setPreviewKey((k) => k + 1)}
               className="flex items-center gap-1 text-xs text-gray-500 hover:text-indigo-600"
@@ -182,7 +214,9 @@ export function CheckinDesignTab({ eventId }: CheckinDesignTabProps) {
           </div>
 
           <p className="text-[10px] text-gray-400 text-center mt-3">
-            这是参会者手机上看到的签到页面。让 AI 助手帮你自定义风格。
+            {hasStaging
+              ? '这是 AI 刚生成的暂存版本，参会者还看不到。满意后让助手「确认上线」即可发布。'
+              : '这是参会者手机上看到的签到页面。让 AI 助手帮你自定义风格。'}
           </p>
         </div>
       </div>

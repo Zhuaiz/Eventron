@@ -313,6 +313,8 @@ export function SubAgentPanel({
             queryClient.invalidateQueries({ queryKey: ['attendees', eventId] });
             queryClient.invalidateQueries({ queryKey: ['dashboard', eventId] });
             queryClient.invalidateQueries({ queryKey: ['badge-templates'] });
+            queryClient.invalidateQueries({ queryKey: ['checkin-page-status', eventId] });
+            queryClient.invalidateQueries({ queryKey: ['event-files', eventId] });
             break;
           }
 
@@ -347,6 +349,8 @@ export function SubAgentPanel({
         ]);
         queryClient.invalidateQueries({ queryKey: ['seats', eventId] });
         queryClient.invalidateQueries({ queryKey: ['attendees', eventId] });
+        queryClient.invalidateQueries({ queryKey: ['checkin-page-status', eventId] });
+        queryClient.invalidateQueries({ queryKey: ['event-files', eventId] });
       } catch (fallbackErr) {
         setMessages((prev) => [
           ...prev,
