@@ -299,6 +299,11 @@ export function SubAgentPanel({
             break;
 
           case 'done': {
+            // Idempotent — if a 'done' event arrives more than once for
+            // the same turn (server-side bug, network replay, stale
+            // worker), only the first one wins. Without this guard a
+            // double-emit would post duplicate assistant messages.
+            if (doneReceived) break;
             doneReceived = true;
             setSessionId(evt.session_id || sessionId);
             const rawQr = (evt.quick_replies || []) as QuickReplyData[];
