@@ -44,6 +44,25 @@ var resultSection    = document.getElementById("result-section");
 var candidatesSection = document.getElementById("candidates-section");
 var successSection   = document.getElementById("success-section");
 
+/* ── Force initial state (defensive against gen LLM mistakes) ──────
+   The gen LLM was caught rendering ALL states simultaneously — info
+   card visible with placeholder text "尊敬的XXX先生/女士 / 胸牌編號:001",
+   confirm button visible, success block visible — instead of starting
+   in the search-only state. JS owns state transitions, so JS owns the
+   initial state too. Any inline style="display:..." or placeholder
+   text the model put on these elements gets wiped here. */
+[resultSection, candidatesSection, successSection, confirmBtn].forEach(function (el) {
+  if (el) el.style.display = "none";
+});
+[
+  "name-display", "seat-display", "zone-display",
+  "title-display", "organization-display",
+  "success-name", "success-msg", "seat-label",
+].forEach(function (id) {
+  var el = document.getElementById(id);
+  if (el) el.textContent = "";
+});
+
 /* ── Tiny helpers ──────────────────────────────────────────────── */
 function $(id) { return document.getElementById(id); }
 function show(el) { if (el) el.style.display = ""; }

@@ -72,6 +72,45 @@ maximum-scale=1.0, user-scalable=no">
 显示 `#success-section`
   5. 已签到：填同样的展示字段，但 #confirm-btn 自动变灰显示"已签到"
 
+## ★ 状态规则（每次都翻车的重灾区，必读）
+页面有 4 个状态：搜索 / 信息卡 / 同名候选 / 签到成功。\
+**只有"搜索"是初始可见的**，其他 3 个全部 `display:none`，由 JS 在用户操作后再显示。
+
+**JS 在加载时会强制把 `#result-section`、`#candidates-section`、\
+`#success-section`、`#confirm-btn` 全部置为 `display:none`，并把 \
+`#name-display` / `#seat-display` / `#zone-display` / `#success-name` / \
+`#success-msg` 等 span 的文字清空。** 所以即使你忘了，页面也能正常工作——\
+但请**仍然按下面规则写**，确保 HTML 语义清晰：
+
+### 错的（参考图里那些示例文字会带进 HTML）
+```html
+<section id="result-section">  <!-- 缺 display:none -->
+  <p>尊敬的 <span id="name-display">XXX</span> 先生/女士</p>
+  <p>胸牌編號：<span id="badge-display">001</span></p>
+  <p>您的席位：<span id="seat-display">3號席</span></p>
+</section>
+<button id="confirm-btn">簽到</button>  <!-- 缺 display:none -->
+<section id="success-section">  <!-- 缺 display:none -->
+  您已成功簽到！感謝您的參與。
+</section>
+```
+↑ 上来就把所有状态堆在一起显示，"伪签到成功"会先于搜索框出现。
+
+### 对的
+```html
+<section id="result-section" style="display:none;">
+  <p>尊敬的 <span id="name-display"></span> 先生/女士</p>
+  <p>您的席位：<span id="seat-display"></span></p>
+</section>
+<button id="confirm-btn" onclick="doConfirm()" style="display:none;">簽到</button>
+<section id="success-section" style="display:none;">
+  <h2 id="success-name"></h2>
+  <p id="success-msg"></p>
+</section>
+```
+↑ 所有 JS-填的 span 都是空的，所有非搜索区都 hidden。\
+参考图里写的"XXX / 001 / 3號席"是设计稿示例值——**不要**抄进 HTML。
+
 ## 必备元素（JS 用 ID 操作；可自由排版/分组/装饰）
 布局完全自由——可以加 logo 区、活动介绍、装饰图、底部插画等等任何区块。\
 JS 只在乎下面这几个 ID 存在且语义对：
@@ -407,15 +446,21 @@ def make_checkin_tools(
             image_directive = (
                 "## 可用图片资源（如果需要引用，用下面这些 URL）\n"
                 f"{asset_block}\n\n"
-                "## 关于 `<img>` / `background-image: url(...)` 的硬约束\n"
-                "- 引用路径**只能**用上面列出的 URL，或 `data:` base64，"
-                "或完整的 `https://` 外链。\n"
-                "- 写 `<img src=\"logo.png\">` 之类的相对/虚构路径会显示"
-                "破图——参考图里的 logo / 装饰 / 插画，要么用上面的 URL "
-                "去引，要么用 inline SVG / CSS 自己画，不要凭空造路径。\n"
-                "- 重画还是直接引用，由你根据参考图性质判断："
-                "如果是设计稿/最终视觉就直接引；如果是风格参考/灵感"
-                "板就重画——两种都行，但都要遵守上面的引用规则。"
+                "## 引用 vs 重画 — 判断规则\n"
+                "看一眼参考图实际内容，按下面规则选：\n"
+                "- 图里**已经有**你想要在页面里出现的具体视觉元素"
+                "（logo 图样、城市剪影、完整装饰背景、特定字体的标题等）\n"
+                "  → 用 URL 直接引用图（`<img src=\"该URL\">` 或 "
+                "`background-image: url('该URL')`），把图当作素材来源\n"
+                "- 图只是**色调/风格的灵感**（色板、氛围参考、抽象配色）"
+                "→ 用 inline SVG / CSS 自己画\n"
+                "- **没法判断时默认引用**——参考图性质偏具体的概率更高，"
+                "重画一个差不多但不一致的版本反而拉远效果\n\n"
+                "## 关于 `<img>` / `background-image` 的硬约束\n"
+                "引用路径**只能**用上面列出的 URL、`data:` base64、"
+                "或完整的 `https://` 外链。**禁止**写 `<img src=\"logo.png\">`、"
+                "`url('city.svg')` 之类的相对/虚构路径——那些文件不存在，"
+                "页面会显示破图。"
             )
         else:
             image_directive = (
