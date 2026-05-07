@@ -393,35 +393,37 @@ def make_checkin_tools(
             asset_lines: list[str] = []
             for i, ref in enumerate(image_refs, start=1):
                 asset_lines.append(
-                    f"  {i}. **{ref['filename']}**\n"
-                    f"     URL: `{ref['url']}`\n"
-                    f"     这是上方多模态消息里附的第 {i} 张图——"
-                    f"模型已经看过它的内容。"
+                    f"  {i}. **{ref['filename']}** —— "
+                    f"上方多模态消息里附的第 {i} 张图。\n"
+                    f"     如果你决定要在 HTML/CSS 里直接引用它，"
+                    f"用这个 URL：`{ref['url']}`"
                 )
             asset_block = "\n".join(asset_lines)
+            # Pure contract — no recommendation. The model decides whether
+            # to redraw (the right call when refs are mood boards / style
+            # inspiration) or to reference the URL directly (the right call
+            # when the ref IS the asset, e.g. a logo or a finished
+            # background). Neither is favoured here.
             image_directive = (
-                "## 可用图片资源（已上传，可直接引用）\n"
+                "## 可用图片资源（如果需要引用，用下面这些 URL）\n"
                 f"{asset_block}\n\n"
-                "**用法（按场景任选）：**\n"
-                "1. 用作整页背景（最忠实于参考图）：\n"
-                "   `<body style=\"background: url('该URL') center/cover "
-                "no-repeat fixed; min-height: 100vh;\">`\n"
-                "   然后在上面叠加半透明的搜索框/信息卡/签到按钮——"
-                "logo、城市剪影、装饰图案都已经在背景里，无需重画。\n"
-                "2. 用作装饰区（顶部 hero 或底部 footer）：\n"
-                "   `<img src=\"该URL\" alt=\"\" style=\"width:100%;\">`\n"
-                "3. 仅作为视觉风格参考，自己用 SVG/CSS 重画。\n\n"
-                "**绝对不要：** 写 `<img src=\"logo.png\">` 或其他**未在上面"
-                "列出**的本地路径——那些文件不存在，会显示破图。\n"
-                "**强烈建议：** 当用户给的就是想要的整体视觉效果时，"
-                "**直接当背景图用**比让你重画准确得多。"
+                "## 关于 `<img>` / `background-image: url(...)` 的硬约束\n"
+                "- 引用路径**只能**用上面列出的 URL，或 `data:` base64，"
+                "或完整的 `https://` 外链。\n"
+                "- 写 `<img src=\"logo.png\">` 之类的相对/虚构路径会显示"
+                "破图——参考图里的 logo / 装饰 / 插画，要么用上面的 URL "
+                "去引，要么用 inline SVG / CSS 自己画，不要凭空造路径。\n"
+                "- 重画还是直接引用，由你根据参考图性质判断："
+                "如果是设计稿/最终视觉就直接引；如果是风格参考/灵感"
+                "板就重画——两种都行，但都要遵守上面的引用规则。"
             )
         else:
             image_directive = (
-                "## 视觉风格说明\n"
-                "本次没有用户上传的参考图。请按上方「用户附加要求」自由设计；"
-                "**不要**使用任何 `<img src=\"...\">` 引用本地文件——没有"
-                "可用资源。需要图形元素时用 inline SVG / CSS 渐变 / Emoji。"
+                "## 视觉资源\n"
+                "本次没有用户上传的参考图。请按「用户附加要求」自由设计；"
+                "**不要**写 `<img src=\"logo.png\">` 或其他相对/虚构路径——"
+                "没有可用资源。需要图形元素时用 inline SVG / CSS 渐变 / "
+                "Emoji，或外链 `https://...` 图片。"
             )
 
         from langchain_core.messages import HumanMessage as HM
