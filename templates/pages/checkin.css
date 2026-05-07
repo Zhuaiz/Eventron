@@ -158,6 +158,82 @@ body {
   color: #ccc;
 }
 
+/* ── 2-step flow: greeting + info rows + hint ── */
+.result-card .result-greeting {
+  font-size: 16px;
+  color: #475569;
+  margin: 0 0 16px;
+  text-align: center;
+}
+
+.result-card .result-greeting .result-name {
+  font-weight: 700;
+  color: #1a1a2e;
+  margin: 0 4px;
+}
+
+.result-card .result-info {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.result-card .result-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+.result-card .result-key {
+  color: #64748b;
+}
+
+.result-card .result-val {
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.result-card .result-hint {
+  font-size: 12px;
+  color: #94a3b8;
+  text-align: center;
+  margin: 0;
+}
+
+/* ── Confirm button (revealed after lookup) ── */
+.confirm-btn {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  padding: 16px;
+  margin-top: 14px;
+  border: none;
+  border-radius: 14px;
+  font-size: 17px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  box-shadow: 0 6px 20px rgba(220, 38, 38, 0.35);
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+}
+
+.confirm-btn:active {
+  transform: translateY(1px);
+  box-shadow: 0 3px 10px rgba(220, 38, 38, 0.3);
+}
+
+.confirm-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .btn-checkin {
   display: block;
   width: 100%;

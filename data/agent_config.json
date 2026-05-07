@@ -11,12 +11,12 @@
       "provider": "qwen"
     },
     "max": {
-      "model": "qwen-max",
+      "model": "qwen-vl-max",
       "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "provider": "qwen"
     },
     "strong": {
-      "model": "qwen-plus",
+      "model": "qwen-vl-plus",
       "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "provider": "qwen"
     }

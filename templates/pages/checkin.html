@@ -38,10 +38,35 @@
     </form>
   </section>
 
-  <!-- Result Section (hidden by default) -->
+  <!-- Result Section: shown after lookup, before user confirms.
+       JS fills #name-display / #seat-display / #zone-display. -->
   <section class="result-card" id="result-section" style="display:none;">
-    <!-- Populated by JS -->
+    <p class="result-greeting">
+      尊敬的 <span id="name-display" class="result-name"></span>
+    </p>
+    <div class="result-info">
+      <div class="result-row">
+        <span class="result-key">您的席位</span>
+        <span class="result-val" id="seat-display"></span>
+      </div>
+      <div class="result-row">
+        <span class="result-key">所在区域</span>
+        <span class="result-val" id="zone-display"></span>
+      </div>
+    </div>
+    <p class="result-hint">点击下方按钮完成签到</p>
   </section>
+
+  <!-- Confirm button: revealed by JS once a unique match is found. -->
+  <button
+    type="button"
+    class="confirm-btn"
+    id="confirm-btn"
+    onclick="doConfirm()"
+    style="display:none;"
+  >
+    签到
+  </button>
 
   <!-- Candidates Section (for disambiguation) -->
   <section class="candidates-card" id="candidates-section" style="display:none;">
