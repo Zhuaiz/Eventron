@@ -72,6 +72,7 @@ export interface ModelInfo {
   provider: string;
   tier: string;
   context: string;
+  vision?: boolean;
 }
 
 export interface LLMProviderInfo {

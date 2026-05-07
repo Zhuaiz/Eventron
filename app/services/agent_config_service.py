@@ -412,6 +412,7 @@ KNOWN_MODELS: list[dict[str, str]] = [
         "provider": "openai",
         "tier": "fast",
         "context": "128K",
+        "vision": True,
     },
     {
         "id": "gpt-4o",
@@ -419,6 +420,7 @@ KNOWN_MODELS: list[dict[str, str]] = [
         "provider": "openai",
         "tier": "smart",
         "context": "128K",
+        "vision": True,
     },
     {
         "id": "gpt-4.1",
@@ -426,6 +428,7 @@ KNOWN_MODELS: list[dict[str, str]] = [
         "provider": "openai",
         "tier": "smart",
         "context": "1M",
+        "vision": True,
     },
     {
         "id": "gpt-4.1-mini",
@@ -433,6 +436,7 @@ KNOWN_MODELS: list[dict[str, str]] = [
         "provider": "openai",
         "tier": "fast",
         "context": "1M",
+        "vision": True,
     },
     {
         "id": "gpt-4.1-nano",
@@ -440,6 +444,7 @@ KNOWN_MODELS: list[dict[str, str]] = [
         "provider": "openai",
         "tier": "fast",
         "context": "1M",
+        "vision": True,
     },
     {
         "id": "o3",
@@ -469,6 +474,7 @@ KNOWN_MODELS: list[dict[str, str]] = [
         "provider": "anthropic",
         "tier": "strong",
         "context": "200K",
+        "vision": True,
     },
     {
         "id": "claude-opus-4-6",
@@ -476,6 +482,7 @@ KNOWN_MODELS: list[dict[str, str]] = [
         "provider": "anthropic",
         "tier": "max",
         "context": "200K",
+        "vision": True,
     },
     {
         "id": "claude-haiku-4-5-20251001",
@@ -483,6 +490,7 @@ KNOWN_MODELS: list[dict[str, str]] = [
         "provider": "anthropic",
         "tier": "fast",
         "context": "200K",
+        "vision": True,
     },
     # GLM / 智谱
     {
@@ -527,6 +535,33 @@ KNOWN_MODELS: list[dict[str, str]] = [
         "provider": "qwen",
         "tier": "strong",
         "context": "32K",
+    },
+    # Qwen VL — vision-capable. pagegen / planner need these for
+    # reference-image flows; selecting a non-VL Qwen there silently
+    # strips images and produces blind output (see PR #1 follow-up).
+    {
+        "id": "qwen-vl-plus",
+        "name": "Qwen VL Plus（视觉）",
+        "provider": "qwen",
+        "tier": "smart",
+        "context": "32K",
+        "vision": True,
+    },
+    {
+        "id": "qwen-vl-max",
+        "name": "Qwen VL Max（视觉）",
+        "provider": "qwen",
+        "tier": "strong",
+        "context": "32K",
+        "vision": True,
+    },
+    {
+        "id": "qwen2.5-vl-72b-instruct",
+        "name": "Qwen2.5 VL 72B（视觉）",
+        "provider": "qwen",
+        "tier": "max",
+        "context": "128K",
+        "vision": True,
     },
 ]
 

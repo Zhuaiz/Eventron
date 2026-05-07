@@ -162,6 +162,11 @@ function ModelSelect({ value, onChange, provider, models }: {
                     <div>
                       <span className="font-medium">{m.name}</span>
                       <span className="ml-2 text-xs text-gray-400 font-mono">{m.id}</span>
+                      {m.vision && (
+                        <span title="支持视觉/图片输入" className="ml-1.5 text-[10px] px-1 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded">
+                          视觉
+                        </span>
+                      )}
                     </div>
                     <span className="text-[10px] text-gray-400 flex-shrink-0">{m.context}</span>
                   </button>
@@ -189,6 +194,11 @@ function ModelSelect({ value, onChange, provider, models }: {
                       <span className="ml-1.5 text-[10px] px-1 py-0.5 bg-gray-100 text-gray-500 rounded">
                         {PROVIDER_LABELS[m.provider] || m.provider}
                       </span>
+                      {m.vision && (
+                        <span title="支持视觉/图片输入" className="ml-1.5 text-[10px] px-1 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded">
+                          视觉
+                        </span>
+                      )}
                     </div>
                     <span className="text-[10px] text-gray-400 flex-shrink-0">{m.context}</span>
                   </button>
