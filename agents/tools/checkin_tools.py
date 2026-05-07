@@ -167,12 +167,25 @@ def _extract_full_page(text: str) -> str:
     return ""
 
 
-def _load_event_images(
+def _load_event_image_refs(
     event_id: str, max_images: int = 2,
 ) -> list[dict[str, Any]]:
-    """Load recent reference images from event file store.
+    """Load latest reference images from the event file store.
 
-    Returns list of image content parts for multimodal LLM message.
+    Each returned dict carries:
+      - ``filename``: the original upload name (e.g. "范本.png")
+      - ``url``: a server-side URL the page can fetch (``/api/v1/events/...``).
+        Works as ``<img src=...>`` or ``background-image: url(...)`` directly,
+        no auth header needed (the route deliberately accepts unauthenticated
+        GETs because file IDs are unguessable UUIDs).
+      - ``vision_part``: a multimodal LangChain content part with the image
+        as a base64 data URI — for feeding the LLM's vision channel.
+
+    Both fields matter and serve different jobs:
+      - ``vision_part`` lets the model **see** the image to decide HOW to use it
+      - ``url`` lets the model **reference** it from the generated HTML/CSS
+        without having to redraw it (the bug that produced broken
+        ``<img src="logo.png">`` was the model not knowing this URL exists).
     """
     import base64
 
@@ -188,22 +201,18 @@ def _load_event_images(
     except Exception:
         return []
 
-    # Get latest uploaded images (sorted by upload time, newest first)
-    images = [
-        e for e in manifest if e.get("type") == "image"
-    ]
+    images = [e for e in manifest if e.get("type") == "image"]
     images.sort(
         key=lambda e: e.get("uploaded_at", ""), reverse=True,
     )
 
-    parts: list[dict[str, Any]] = []
+    refs: list[dict[str, Any]] = []
     for img in images[:max_images]:
         img_path = event_dir / img["stored_name"]
         if not img_path.exists():
             continue
         try:
             raw = img_path.read_bytes()
-            # Detect MIME type
             if raw[:8] == b'\x89PNG\r\n\x1a\n':
                 mime = "image/png"
             elif raw[:2] == b'\xff\xd8':
@@ -211,14 +220,18 @@ def _load_event_images(
             else:
                 mime = img.get("content_type", "image/png")
             b64 = base64.b64encode(raw).decode()
-            parts.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{b64}"},
+            refs.append({
+                "filename": img.get("filename") or img["stored_name"],
+                "url": f"/api/v1/events/{event_id}/files/{img['id']}",
+                "vision_part": {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                },
             })
         except Exception:
             continue
 
-    return parts
+    return refs
 
 
 def make_checkin_tools(
@@ -370,28 +383,47 @@ def make_checkin_tools(
         ev = await event_svc.get_event(eid)
         checkin_js = _load_js("checkin")
 
-        # 2. Load reference images from event file store FIRST so we can
-        #    tailor the prompt depending on whether visuals are available.
-        image_parts = _load_event_images(event_id, max_images=2)
-        n_images = len(image_parts)
+        # 2. Load reference images: both the vision content (so the model
+        #    can SEE them) and their public URLs (so it can REFERENCE them
+        #    in <img>/CSS without redrawing logos / illustrations).
+        image_refs = _load_event_image_refs(event_id, max_images=2)
+        n_images = len(image_refs)
 
-        # The gen prompt only needs to know which input is authoritative:
-        # when reference images are present, they outrank any conflicting
-        # text in `extra_requirements`. The tool docstring already steers
-        # the routing LLM to keep `extra_requirements` non-visual, so this
-        # block is just a safety rail for residual cases.
         if n_images:
+            asset_lines: list[str] = []
+            for i, ref in enumerate(image_refs, start=1):
+                asset_lines.append(
+                    f"  {i}. **{ref['filename']}** —— "
+                    f"上方多模态消息里附的第 {i} 张图。\n"
+                    f"     如果你决定要在 HTML/CSS 里直接引用它，"
+                    f"用这个 URL：`{ref['url']}`"
+                )
+            asset_block = "\n".join(asset_lines)
+            # Pure contract — no recommendation. The model decides whether
+            # to redraw (the right call when refs are mood boards / style
+            # inspiration) or to reference the URL directly (the right call
+            # when the ref IS the asset, e.g. a logo or a finished
+            # background). Neither is favoured here.
             image_directive = (
-                f"## 视觉基准\n"
-                f"消息开头附带 {n_images} 张用户上传的参考图——"
-                "把它们当作视觉模板直接采用（颜色、渐变、字体气质、装饰）。\n"
-                "上面「用户附加要求」里若出现颜色/风格描述与图冲突，以图为准；"
-                "若是功能/结构性的附加要求（如去掉统计栏、加大字号），保留执行。"
+                "## 可用图片资源（如果需要引用，用下面这些 URL）\n"
+                f"{asset_block}\n\n"
+                "## 关于 `<img>` / `background-image: url(...)` 的硬约束\n"
+                "- 引用路径**只能**用上面列出的 URL，或 `data:` base64，"
+                "或完整的 `https://` 外链。\n"
+                "- 写 `<img src=\"logo.png\">` 之类的相对/虚构路径会显示"
+                "破图——参考图里的 logo / 装饰 / 插画，要么用上面的 URL "
+                "去引，要么用 inline SVG / CSS 自己画，不要凭空造路径。\n"
+                "- 重画还是直接引用，由你根据参考图性质判断："
+                "如果是设计稿/最终视觉就直接引；如果是风格参考/灵感"
+                "板就重画——两种都行，但都要遵守上面的引用规则。"
             )
         else:
             image_directive = (
-                "## 视觉基准\n"
-                "本次没有参考图，请按上方「用户附加要求」自由设计。"
+                "## 视觉资源\n"
+                "本次没有用户上传的参考图。请按「用户附加要求」自由设计；"
+                "**不要**写 `<img src=\"logo.png\">` 或其他相对/虚构路径——"
+                "没有可用资源。需要图形元素时用 inline SVG / CSS 渐变 / "
+                "Emoji，或外链 `https://...` 图片。"
             )
 
         from langchain_core.messages import HumanMessage as HM
@@ -404,8 +436,10 @@ def make_checkin_tools(
         )
 
         if n_images:
-            # Multimodal message: images first, then framed text prompt.
-            content_parts: list[dict[str, Any]] = list(image_parts)
+            # Multimodal message: vision parts first, then framed text prompt.
+            content_parts: list[dict[str, Any]] = [
+                ref["vision_part"] for ref in image_refs
+            ]
             content_parts.append({
                 "type": "text",
                 "text": gen_text,
