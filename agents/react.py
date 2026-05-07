@@ -113,7 +113,9 @@ async def react_loop(
         call_timeout: Max seconds to wait for each LLM call.
         on_progress: Optional async callback for streaming progress.
             Called with (event_type, data) where event_type is one of:
-            "thinking", "tool_start", "tool_end", "done", "error".
+            "thinking", "tool_start", "tool_progress", "tool_end", "error".
+            (Note: "done" is intentionally NOT emitted here — it belongs to
+            the outer SSE-stream layer in agent_chat.py.)
 
     Returns:
         Final AIMessage containing the text response to the user.
@@ -174,9 +176,13 @@ async def react_loop(
                 continue
 
             response.tool_call_log = tool_call_log  # type: ignore[attr-defined]
-            await progress("done", {
-                "reply": _truncate(str(response.content), 200),
-            })
+            # Don't emit a "done" progress event here. "done" is reserved
+            # for the SSE-stream-finished signal that agent_chat.py yields
+            # after the whole graph finishes — emitting it from inside the
+            # ReAct loop made the frontend's `case 'done'` fire twice (once
+            # for this inner signal, once for the real SSE done), which
+            # produced the "为啥每次都说两遍" duplicate-reply bug. Nested
+            # ReAct loops would multiply it further.
             return response
 
         # Execute each tool call and feed results back
@@ -268,5 +274,5 @@ async def react_loop(
     # Max iterations reached — return graceful fallback
     fallback = AIMessage(content="操作步骤过多，请简化请求后重试。")
     fallback.tool_call_log = tool_call_log  # type: ignore[attr-defined]
-    await progress("done", {"reply": fallback.content})
+    # See note above: no "done" emit here either.
     return fallback

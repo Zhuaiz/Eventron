@@ -644,10 +644,20 @@ async def agent_chat_stream(
         # Run graph in background task
         graph_task = asyncio.create_task(graph.ainvoke(initial_state))
 
+        # Internal events that must NOT reach the client. "done" is the
+        # outer-stream-finished signal we yield ourselves below; if any
+        # inner code (a ReAct loop, a plugin) accidentally pushes one to
+        # the progress queue, treating it as the real done would make the
+        # frontend render the assistant reply twice. "error" is reserved
+        # for the explicit error event at the bottom of this function.
+        _SUPPRESSED_PROGRESS_EVENTS = {"done", "error"}
+
         try:
             while not graph_task.done():
                 try:
                     evt = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    if evt.get("event") in _SUPPRESSED_PROGRESS_EVENTS:
+                        continue
                     yield f"data: {_json.dumps(evt, ensure_ascii=False)}\n\n"
                 except asyncio.TimeoutError:
                     # Send heartbeat to keep connection alive
@@ -656,6 +666,8 @@ async def agent_chat_stream(
             # Drain remaining events
             while not queue.empty():
                 evt = await queue.get()
+                if evt.get("event") in _SUPPRESSED_PROGRESS_EVENTS:
+                    continue
                 yield f"data: {_json.dumps(evt, ensure_ascii=False)}\n\n"
 
             # Get final result
