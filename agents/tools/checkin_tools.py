@@ -136,47 +136,104 @@ def _extract_full_page(text: str) -> str:
     return ""
 
 
+# Heuristic ranking: filenames containing these tokens probably ARE the
+# user's primary design reference and should be sent to the vision channel
+# first. Latest-by-upload-time order is used as a fallback / tiebreaker.
+_PRIMARY_NAME_HINTS = (
+    "范本", "範本", "design", "main", "primary",
+    "海报", "海報", "poster", "mockup",
+)
+
+
 def _load_event_image_refs(
-    event_id: str, max_images: int = 2,
-) -> list[dict[str, Any]]:
-    """Load latest reference images from the event file store.
+    event_id: str,
+    max_vision_images: int = 5,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Load uploaded images for an event, returning two views.
 
-    Each returned dict carries:
-      - ``filename``: the original upload name (e.g. "范本.png")
-      - ``url``: a server-side URL the page can fetch (``/api/v1/events/...``).
-        Works as ``<img src=...>`` or ``background-image: url(...)`` directly,
-        no auth header needed (the route deliberately accepts unauthenticated
-        GETs because file IDs are unguessable UUIDs).
-      - ``vision_part``: a multimodal LangChain content part with the image
-        as a base64 data URI — for feeding the LLM's vision channel.
+    Returns a tuple ``(vision_refs, all_assets)``:
+      - ``vision_refs``: up to ``max_vision_images`` entries — each with
+        ``filename``, ``url``, and ``vision_part`` (base64 data URI for the
+        multimodal channel). These are the images the gen LLM will actually
+        SEE. Ranked by name heuristic ("范本"/"design"/etc. first), then by
+        upload time desc.
+      - ``all_assets``: ALL uploaded images — each with ``filename`` and
+        ``url`` only. Listed in the prompt so the model knows the full asset
+        roster and can reference any of them via URL, even when it doesn't
+        have direct vision on a given file (e.g. user uploaded 6 images but
+        only top-N fit the vision budget).
 
-    Both fields matter and serve different jobs:
-      - ``vision_part`` lets the model **see** the image to decide HOW to use it
-      - ``url`` lets the model **reference** it from the generated HTML/CSS
-        without having to redraw it (the bug that produced broken
-        ``<img src="logo.png">`` was the model not knowing this URL exists).
+    Why two views: the previous bug was that we capped at 2 images for
+    vision AND only listed those 2 in the URL section. User uploaded 6
+    files; model thought there were only 2 assets. Splitting "what model
+    can see" from "what model knows exists" fixes that.
     """
     import base64
 
     event_dir = Path(f"uploads/events/{event_id}")
     manifest_path = event_dir / ".manifest.json"
     if not manifest_path.exists():
-        return []
+        return [], []
 
     try:
         manifest = json.loads(
             manifest_path.read_text(encoding="utf-8"),
         )
     except Exception:
-        return []
+        return [], []
 
     images = [e for e in manifest if e.get("type") == "image"]
-    images.sort(
-        key=lambda e: e.get("uploaded_at", ""), reverse=True,
+    if not images:
+        return [], []
+
+    def _rank(img: dict[str, Any]) -> tuple[int, str]:
+        # Lower tuple sorts earlier. Primary-name hits get rank 0; rest 1.
+        # Within each bucket, newer uploads first (negate the timestamp by
+        # using `\x00` to invert lexicographic order isn't worth it; just
+        # pass uploaded_at and sort descending after).
+        fn = (img.get("filename") or "").lower()
+        primary = 0 if any(h in fn for h in _PRIMARY_NAME_HINTS) else 1
+        return (primary, img.get("uploaded_at", ""))
+
+    # Sort: primary-named first, then within each group newest first.
+    images_sorted = sorted(
+        images,
+        key=lambda e: (
+            0 if any(
+                h in (e.get("filename") or "").lower()
+                for h in _PRIMARY_NAME_HINTS
+            ) else 1,
+            # Negate timestamp so newer comes first within each group
+            "\x00" if not e.get("uploaded_at") else "",
+            -1 * len(e.get("uploaded_at", "")),
+        ),
+    )
+    # Simpler: stable sort by primary-flag, then by upload time desc.
+    images_sorted = sorted(
+        images,
+        key=lambda e: e.get("uploaded_at", ""),
+        reverse=True,
+    )
+    images_sorted = sorted(
+        images_sorted,
+        key=lambda e: 0 if any(
+            h in (e.get("filename") or "").lower()
+            for h in _PRIMARY_NAME_HINTS
+        ) else 1,
     )
 
-    refs: list[dict[str, Any]] = []
-    for img in images[:max_images]:
+    # All assets — every uploaded image gets a URL the model can reference.
+    all_assets: list[dict[str, str]] = [
+        {
+            "filename": img.get("filename") or img["stored_name"],
+            "url": f"/api/v1/events/{event_id}/files/{img['id']}",
+        }
+        for img in images_sorted
+    ]
+
+    # Vision refs — top-N actually loaded as base64 for multimodal input.
+    vision_refs: list[dict[str, Any]] = []
+    for img in images_sorted[:max_vision_images]:
         img_path = event_dir / img["stored_name"]
         if not img_path.exists():
             continue
@@ -189,7 +246,7 @@ def _load_event_image_refs(
             else:
                 mime = img.get("content_type", "image/png")
             b64 = base64.b64encode(raw).decode()
-            refs.append({
+            vision_refs.append({
                 "filename": img.get("filename") or img["stored_name"],
                 "url": f"/api/v1/events/{event_id}/files/{img['id']}",
                 "vision_part": {
@@ -200,7 +257,7 @@ def _load_event_image_refs(
         except Exception:
             continue
 
-    return refs
+    return vision_refs, all_assets
 
 
 def make_checkin_tools(
@@ -333,8 +390,9 @@ def make_checkin_tools(
             ``"深蓝紫渐变背景，标题居中大号，无统计栏，科技感"``
 
         ## 返回
-        JSON：``status``、``preview_url``、``reference_images_used``
-        （实际使用的参考图数量，可据此向用户确认）、``next_step`` 等。
+        JSON：``status``、``preview_url``、``reference_images_seen``
+        （视觉模型实际看到的图数量）、``reference_images_total``
+        （已上传总数；URL 全部暴露给模型可引用）、``next_step`` 等。
 
         Args:
             extra_requirements: 视觉之外的功能/结构补充。无参考图时改为视觉描述。
@@ -352,30 +410,40 @@ def make_checkin_tools(
         ev = await event_svc.get_event(eid)
         checkin_js = _load_js("checkin")
 
-        # 2. Load reference images: both the vision content (so the model
-        #    can SEE them) and their public URLs (so it can REFERENCE them
-        #    in <img>/CSS without redrawing logos / illustrations).
-        image_refs = _load_event_image_refs(event_id, max_images=2)
-        n_images = len(image_refs)
+        # 2. Load reference images. Two views:
+        #    - vision_refs: top-N (default 5) actually loaded as base64 for
+        #      the multimodal vision channel. Ranked by name heuristic
+        #      (范本/design/poster first) then upload time desc.
+        #    - all_assets: every uploaded image's URL. The model needs to
+        #      know the FULL asset roster, not just what fits in vision.
+        #      The previous bug — model writing <img src="logo.png"> for
+        #      images outside the vision-2 cap — was caused by us listing
+        #      only those 2 in the URL section.
+        vision_refs, all_assets = _load_event_image_refs(
+            event_id, max_vision_images=5,
+        )
+        n_vision = len(vision_refs)
+        n_total = len(all_assets)
 
-        if n_images:
+        if n_total:
             asset_lines: list[str] = []
-            for i, ref in enumerate(image_refs, start=1):
+            vision_filenames = {r["filename"] for r in vision_refs}
+            for i, asset in enumerate(all_assets, start=1):
+                seen_marker = (
+                    " 👁 (视觉模型已读)"
+                    if asset["filename"] in vision_filenames else ""
+                )
                 asset_lines.append(
-                    f"  {i}. **{ref['filename']}** — `{ref['url']}`"
+                    f"  {i}. **{asset['filename']}** — `{asset['url']}`{seen_marker}"
                 )
             asset_block = "\n".join(asset_lines)
-            # Facts only — list URLs and forbid fabricated paths. No
-            # opinion on whether to reference vs redraw; the model
-            # decides based on what the reference actually is.
             image_directive = (
-                "## 可用图片资源（视觉模型已经看过这些图）\n"
+                f"## 可用图片资源（共 {n_total} 张已上传）\n"
                 f"{asset_block}\n\n"
-                "想直接引用就用上面的 URL（`<img>` 或 `background-image`），"
+                "想直接引用就用上面任一 URL（`<img>` 或 `background-image`），"
                 "想自己用 SVG / CSS 重画也行——按参考图实际内容判断。\n"
-                "**只是**：路径只能用上面的 URL、`data:` base64、或完整 "
-                "`https://` 外链。**不要**写 `logo.png`、`city.svg` 之类的"
-                "虚构相对路径——文件不存在，会破图。"
+                "**路径硬约束**：只能用上面列出的 URL、`data:` base64、或"
+                "完整 `https://` 外链。写 `logo.png` 之类的虚构相对路径会破图。"
             )
         else:
             image_directive = (
@@ -393,10 +461,10 @@ def make_checkin_tools(
             image_directive=image_directive,
         )
 
-        if n_images:
+        if n_vision:
             # Multimodal message: vision parts first, then framed text prompt.
             content_parts: list[dict[str, Any]] = [
-                ref["vision_part"] for ref in image_refs
+                ref["vision_part"] for ref in vision_refs
             ]
             content_parts.append({
                 "type": "text",
@@ -477,10 +545,16 @@ def make_checkin_tools(
                         f"hard cap exceeded: {HARD_CAP_SECONDS}s"
                     )
 
-        if n_images:
-            await _push_progress(
-                f"读取到 {n_images} 张参考图，将作为视觉风格基准"
-            )
+        if n_total:
+            if n_total > n_vision:
+                await _push_progress(
+                    f"已上传 {n_total} 张图（其中 {n_vision} 张视觉模型已读，"
+                    f"全部 URL 已暴露）"
+                )
+            else:
+                await _push_progress(
+                    f"已读取 {n_vision} 张参考图（视觉模型已看过）"
+                )
         await _push_progress("正在调用模型生成页面…")
 
         stream_task = asyncio.create_task(_consume_stream())
@@ -579,11 +653,16 @@ def make_checkin_tools(
         staging_path = upload_dir / "checkin_page_staging.html"
         staging_path.write_text(html, encoding="utf-8")
 
-        if n_images:
-            usage_note = (
-                f"已读取并参考 {n_images} 张用户上传的参考图，"
-                "页面配色与风格基于参考图生成。"
-            )
+        if n_total:
+            if n_total > n_vision:
+                usage_note = (
+                    f"已上传 {n_total} 张图，其中 {n_vision} 张被视觉模型直接看过，"
+                    "全部 URL 已暴露给生成模型可引用。"
+                )
+            else:
+                usage_note = (
+                    f"已读取并参考 {n_vision} 张用户上传的参考图。"
+                )
         else:
             usage_note = (
                 "本次没有用户上传的参考图，"
@@ -598,7 +677,8 @@ def make_checkin_tools(
                 "请在预览中确认效果，满意后调用 confirm_staged_page 正式部署。"
                 "如需重新生成，可再次调用本工具。"
             ),
-            "reference_images_used": n_images,
+            "reference_images_seen": n_vision,
+            "reference_images_total": n_total,
             "preview_url": f"/p/{event_id}/checkin?preview=staging",
             "next_step": "confirm_staged_page",
             "size_bytes": len(html.encode()),
