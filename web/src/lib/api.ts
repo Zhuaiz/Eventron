@@ -70,8 +70,9 @@ export interface ModelInfo {
   id: string;
   name: string;
   provider: string;
-  tier: string;
+  tier?: string;        // legacy hint; catalog API does not always supply it
   context: string;
+  vision?: boolean;     // true if provider/ID heuristic says it accepts images
 }
 
 export interface LLMProviderInfo {
@@ -710,8 +711,11 @@ export class ApiClient {
   }
 
   // LLM Providers
-  async getAvailableModels() {
-    return this.request<Record<string, ModelInfo[]>>('GET', '/v1/llm-providers/models');
+  async getAvailableModels(refresh: boolean = false) {
+    const path = refresh
+      ? '/v1/llm-providers/models?refresh=true'
+      : '/v1/llm-providers/models';
+    return this.request<Record<string, ModelInfo[]>>('GET', path);
   }
 
   async getLLMProviders() {

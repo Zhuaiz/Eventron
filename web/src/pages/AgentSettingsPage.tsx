@@ -11,7 +11,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Bot, ChevronDown, ChevronRight, RotateCcw,
   Save, Zap, Brain, Sparkles, Crown, ToggleLeft, ToggleRight,
-  Key, Eye, EyeOff, Server,
+  Key, Eye, EyeOff, Server, RefreshCw,
 } from 'lucide-react';
 import { apiClient } from '../lib/api';
 import type { AgentConfig, AgentConfigDetail, LLMProviderInfo, ModelInfo, AvailableProvider } from '../lib/api';
@@ -162,6 +162,11 @@ function ModelSelect({ value, onChange, provider, models }: {
                     <div>
                       <span className="font-medium">{m.name}</span>
                       <span className="ml-2 text-xs text-gray-400 font-mono">{m.id}</span>
+                      {m.vision && (
+                        <span title="支持图片输入" className="ml-1.5 text-[10px] px-1 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded">
+                          视觉
+                        </span>
+                      )}
                     </div>
                     <span className="text-[10px] text-gray-400 flex-shrink-0">{m.context}</span>
                   </button>
@@ -189,6 +194,11 @@ function ModelSelect({ value, onChange, provider, models }: {
                       <span className="ml-1.5 text-[10px] px-1 py-0.5 bg-gray-100 text-gray-500 rounded">
                         {PROVIDER_LABELS[m.provider] || m.provider}
                       </span>
+                      {m.vision && (
+                        <span title="支持图片输入" className="ml-1.5 text-[10px] px-1 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded">
+                          视觉
+                        </span>
+                      )}
                     </div>
                     <span className="text-[10px] text-gray-400 flex-shrink-0">{m.context}</span>
                   </button>
@@ -249,12 +259,18 @@ function LLMProviderSection() {
     queryKey: ['available-providers'],
     queryFn: () => apiClient.getAvailableProviders(),
   });
-  const { data: modelsData } = useQuery({
+  const { data: modelsData, refetch: refetchModels, isFetching: refreshingModels } = useQuery({
     queryKey: ['available-models'],
     queryFn: () => apiClient.getAvailableModels(),
     staleTime: 600_000, // 10 min
   });
   const allModels: ModelInfo[] = (modelsData as Record<string, ModelInfo[]>)?.all || [];
+
+  const handleRefreshModels = async () => {
+    // Force-refresh: bypass server cache, then refetch the React Query.
+    await apiClient.getAvailableModels(true);
+    await refetchModels();
+  };
 
   const [edits, setEdits] = useState<Record<string, { provider: string; model: string; api_key: string; base_url: string }>>({});
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
@@ -340,6 +356,15 @@ function LLMProviderSection() {
         </div>
         <div className="flex items-center gap-2">
           {msg && <span className={`text-xs ${msg.includes('失败') ? 'text-red-500' : 'text-green-600'}`}>{msg}</span>}
+          <button
+            onClick={handleRefreshModels}
+            disabled={refreshingModels}
+            title="重新从各家 /v1/models 拉取最新模型列表（绕过 1h 缓存）"
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            <RefreshCw size={12} className={refreshingModels ? 'animate-spin' : ''} />
+            {refreshingModels ? '刷新中…' : '刷新模型列表'}
+          </button>
           <button onClick={handleResetAll}
             className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">
             <RotateCcw size={12} /> 全部重置

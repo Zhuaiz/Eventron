@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.services import agent_config_service as svc
@@ -88,13 +88,27 @@ class LLMProviderPatch(BaseModel):
 
 
 @router.get("/llm-providers/models")
-async def available_models() -> dict[str, Any]:
-    """Return known models grouped by provider.
+async def available_models(
+    refresh: bool = Query(
+        False,
+        description="Bypass the 1h cache and refetch every provider's /models endpoint",
+    ),
+) -> dict[str, Any]:
+    """Return models grouped by provider, pulled live from each provider's /v1/models.
 
-    Frontend uses this to populate the model-name dropdown so users
-    don't have to memorize model ID strings.
+    Cached for 1 hour; pass ``?refresh=true`` to force a refetch.
+    Providers with no API key configured (or whose endpoint failed) fall
+    back to a small overlay-derived set so the picker is never completely
+    empty.
     """
-    return svc.get_available_models()
+    return await svc.get_available_models(refresh=refresh)
+
+
+@router.get("/llm-providers/models/cache-info")
+async def models_cache_info() -> dict[str, Any]:
+    """Diagnostic — what's in the catalog cache and how stale it is."""
+    from app.services.model_catalog import cache_info
+    return cache_info()
 
 
 @router.get("/llm-providers")
