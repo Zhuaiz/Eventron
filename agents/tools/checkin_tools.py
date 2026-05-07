@@ -61,104 +61,34 @@ maximum-scale=1.0, user-scalable=no">
 </html>
 ```
 
-## 用户流程（两步：先查询，再确认签到）
-真正驱动这个页面的 JS 已经写好，会自动注入。流程如下：
-  1. 用户输入姓名 → 点 #search-btn → JS 调 /lookup（无副作用），\
-取回信息卡数据
-  2. 单匹配：JS 把姓名/席位/区域填进 `#name-display` / `#seat-display` / \
-`#zone-display`，并把 `#result-section` 显示出来、`#confirm-btn` 也显示出来
-  3. 同名匹配：JS 把候选列表填进 `#candidates-list`，用户点击其一
-  4. 用户点 #confirm-btn → JS 调 /confirm/{{attendee_id}} → 真正签到 → \
-显示 `#success-section`
-  5. 已签到：填同样的展示字段，但 #confirm-btn 自动变灰显示"已签到"
-
-## ★ 状态规则（每次都翻车的重灾区，必读）
-页面有 4 个状态：搜索 / 信息卡 / 同名候选 / 签到成功。\
-**只有"搜索"是初始可见的**，其他 3 个全部 `display:none`，由 JS 在用户操作后再显示。
-
-**JS 在加载时会强制把 `#result-section`、`#candidates-section`、\
-`#success-section`、`#confirm-btn` 全部置为 `display:none`，并把 \
-`#name-display` / `#seat-display` / `#zone-display` / `#success-name` / \
-`#success-msg` 等 span 的文字清空。** 所以即使你忘了，页面也能正常工作——\
-但请**仍然按下面规则写**，确保 HTML 语义清晰：
-
-### 错的（参考图里那些示例文字会带进 HTML）
-```html
-<section id="result-section">  <!-- 缺 display:none -->
-  <p>尊敬的 <span id="name-display">XXX</span> 先生/女士</p>
-  <p>胸牌編號：<span id="badge-display">001</span></p>
-  <p>您的席位：<span id="seat-display">3號席</span></p>
-</section>
-<button id="confirm-btn">簽到</button>  <!-- 缺 display:none -->
-<section id="success-section">  <!-- 缺 display:none -->
-  您已成功簽到！感謝您的參與。
-</section>
-```
-↑ 上来就把所有状态堆在一起显示，"伪签到成功"会先于搜索框出现。
-
-### 对的
-```html
-<section id="result-section" style="display:none;">
-  <p>尊敬的 <span id="name-display"></span> 先生/女士</p>
-  <p>您的席位：<span id="seat-display"></span></p>
-</section>
-<button id="confirm-btn" onclick="doConfirm()" style="display:none;">簽到</button>
-<section id="success-section" style="display:none;">
-  <h2 id="success-name"></h2>
-  <p id="success-msg"></p>
-</section>
-```
-↑ 所有 JS-填的 span 都是空的，所有非搜索区都 hidden。\
-参考图里写的"XXX / 001 / 3號席"是设计稿示例值——**不要**抄进 HTML。
-
-## 必备元素（JS 用 ID 操作；可自由排版/分组/装饰）
-布局完全自由——可以加 logo 区、活动介绍、装饰图、底部插画等等任何区块。\
-JS 只在乎下面这几个 ID 存在且语义对：
-
-**步骤 1—搜索（必备）**
+## JS 依赖的 ID（拼写必须一致；初始可见性 + 文本由 JS 处理，不用你管）
+搜索（必备）：
 - `<input id="name-input">` 姓名输入框
-- `<button id="search-btn" onclick="doSearch()">` 触发查询的按钮（按钮\
-文字自由：搜索/查询/查找席位都行）
+- `<button id="search-btn" onclick="doSearch()">` 搜索按钮
 
-**步骤 2—信息卡（必备）：JS 在 lookup 成功后会填这些字段**
-- `<section id="result-section" style="display:none;">` 信息卡外壳，\
-JS 会把它显示出来；内部布局自由
-- 在信息卡内部任意位置放：
-  - `<span id="name-display"></span>` 姓名
-  - `<span id="seat-display"></span>` 席位号
-  - `<span id="zone-display"></span>` 区域名（可选；活动没分区就空）
+信息卡（必备，搜到人后 JS 显示并填字段）：
+- `<section id="result-section">` 外壳
+- 内含 `<span id="name-display"></span>`（姓名）+ `<span id="seat-display"></span>`（席位）
+- 可选 `<span id="zone-display"></span>`（区域）
 
-**步骤 3—确认签到（必备）：用户审核后点这个按钮**
-- `<button id="confirm-btn" onclick="doConfirm()" style="display:none;">` \
-确认签到按钮（按钮文字自由：签到/确认签到/我要签到都行）。**这是设计上\
-最醒目的 CTA，红色大按钮。**
+确认签到（必备，CTA）：
+- `<button id="confirm-btn" onclick="doConfirm()">` 确认按钮
 
-**步骤 4—成功（必备）**
-- `<section id="success-section" style="display:none;">` 成功区
-  - 内含 `<span id="success-name"></span>` 显示姓名，\
-`<p id="success-msg"></p>` 显示提示
-  - 可选：`<div id="seat-info" style="display:none;">\
-<span id="seat-label"></span></div>` 显示座位
-  - 可加返回按钮 `<button onclick="resetPage()">返回</button>`
+成功（必备）：
+- `<section id="success-section">` 外壳，内含 `<span id="success-name"></span>` + `<p id="success-msg"></p>`
 
-**同名消歧（可选）**
-- `<section id="candidates-section" style="display:none;"><div \
-id="candidates-list"></div></section>` —— 加了的话，同名时会显示候选\
-列表；不加的话同名会 toast 提示"输入更完整姓名"
+可选：`<section id="candidates-section"><div id="candidates-list"></div></section>` 同名消歧；\
+`<span id="stat-total"></span>` / `<span id="stat-checked"></span>` / `<span id="stat-rate"></span>` 统计栏。
 
-**统计栏（可选）**
-若用户要展示实时签到率，加 `<span id="stat-total"></span>` / \
-`<span id="stat-checked"></span>` / `<span id="stat-rate"></span>`
+## 流程
+搜索 → JS 调 /lookup → 显示信息卡 + 确认按钮 → 用户点确认 → JS 调 /confirm/{{attendee_id}} → 显示成功区。\
+后端的事不用管。
 
-## 设计原则
-- **移动端优先**：max-width 约 440px 居中；窄屏下不要溢出
-- 活动名称醒目展示；可加副标题、日期、地点、装饰
-- 信息卡（result-section）是页面的视觉焦点之一——参会者在这里\
-确认是不是自己。配色和参考图保持一致
-- 确认按钮（confirm-btn）是页面 CTA——足够大、配色突出、点击区域舒适
-- 装饰区（背景渐变、纹理、几何线条、城市剪影 SVG 等）大胆加
-- 不要写任何 `<script>`，JS 会由系统自动注入
-- 不要修改上述任何 ID 的拼写——拼错就 JS 找不到、流程跑不通"""
+## 几条硬要求
+- 移动端优先（max-width ≈ 440px 居中）
+- 不要写 `<script>`（JS 由系统自动注入）
+- 带 ID 的 `<span>` 留空，不要塞示例文字（参考图里的 XXX/001/3號席 是设计稿示意，不抄进 HTML）
+- ID 不能拼错"""
 
 
 def _extract_full_page(text: str) -> str:
@@ -432,43 +362,26 @@ def make_checkin_tools(
             asset_lines: list[str] = []
             for i, ref in enumerate(image_refs, start=1):
                 asset_lines.append(
-                    f"  {i}. **{ref['filename']}** —— "
-                    f"上方多模态消息里附的第 {i} 张图。\n"
-                    f"     如果你决定要在 HTML/CSS 里直接引用它，"
-                    f"用这个 URL：`{ref['url']}`"
+                    f"  {i}. **{ref['filename']}** — `{ref['url']}`"
                 )
             asset_block = "\n".join(asset_lines)
-            # Pure contract — no recommendation. The model decides whether
-            # to redraw (the right call when refs are mood boards / style
-            # inspiration) or to reference the URL directly (the right call
-            # when the ref IS the asset, e.g. a logo or a finished
-            # background). Neither is favoured here.
+            # Facts only — list URLs and forbid fabricated paths. No
+            # opinion on whether to reference vs redraw; the model
+            # decides based on what the reference actually is.
             image_directive = (
-                "## 可用图片资源（如果需要引用，用下面这些 URL）\n"
+                "## 可用图片资源（视觉模型已经看过这些图）\n"
                 f"{asset_block}\n\n"
-                "## 引用 vs 重画 — 判断规则\n"
-                "看一眼参考图实际内容，按下面规则选：\n"
-                "- 图里**已经有**你想要在页面里出现的具体视觉元素"
-                "（logo 图样、城市剪影、完整装饰背景、特定字体的标题等）\n"
-                "  → 用 URL 直接引用图（`<img src=\"该URL\">` 或 "
-                "`background-image: url('该URL')`），把图当作素材来源\n"
-                "- 图只是**色调/风格的灵感**（色板、氛围参考、抽象配色）"
-                "→ 用 inline SVG / CSS 自己画\n"
-                "- **没法判断时默认引用**——参考图性质偏具体的概率更高，"
-                "重画一个差不多但不一致的版本反而拉远效果\n\n"
-                "## 关于 `<img>` / `background-image` 的硬约束\n"
-                "引用路径**只能**用上面列出的 URL、`data:` base64、"
-                "或完整的 `https://` 外链。**禁止**写 `<img src=\"logo.png\">`、"
-                "`url('city.svg')` 之类的相对/虚构路径——那些文件不存在，"
-                "页面会显示破图。"
+                "想直接引用就用上面的 URL（`<img>` 或 `background-image`），"
+                "想自己用 SVG / CSS 重画也行——按参考图实际内容判断。\n"
+                "**只是**：路径只能用上面的 URL、`data:` base64、或完整 "
+                "`https://` 外链。**不要**写 `logo.png`、`city.svg` 之类的"
+                "虚构相对路径——文件不存在，会破图。"
             )
         else:
             image_directive = (
                 "## 视觉资源\n"
-                "本次没有用户上传的参考图。请按「用户附加要求」自由设计；"
-                "**不要**写 `<img src=\"logo.png\">` 或其他相对/虚构路径——"
-                "没有可用资源。需要图形元素时用 inline SVG / CSS 渐变 / "
-                "Emoji，或外链 `https://...` 图片。"
+                "本次没有用户上传的参考图。需要图形元素时用 inline SVG / "
+                "CSS / Emoji。不要 `<img src=\"...\">` 引用任何相对路径。"
             )
 
         from langchain_core.messages import HumanMessage as HM
