@@ -85,7 +85,11 @@ maximum-scale=1.0, user-scalable=no">
 后端的事不用管。
 
 ## 几条硬要求
-- 移动端优先（max-width ≈ 440px 居中）
+- **移动端优先**：根容器 `max-width ≈ 440px` 居中。所有 `<img>` 设 \
+  `max-width: 100%; height: auto;`；用作背景时 `background-size: cover; \
+background-position: center;` —— 别让大图撑爆容器
+- 引用上传的图时，URL 已经带 `?w=1080`（服务器自动缩到 1080px 长边，缓存\
+返回），直接用即可，不要去掉这个参数
 - 不要写 `<script>`（JS 由系统自动注入）
 - 带 ID 的 `<span>` 留空，不要塞示例文字（参考图里的 XXX/001/3號席 是设计稿示意，不抄进 HTML）
 - ID 不能拼错"""
@@ -223,10 +227,16 @@ def _load_event_image_refs(
     )
 
     # All assets — every uploaded image gets a URL the model can reference.
+    # Default to ?w=1080 so the model embeds a mobile-friendly downsized
+    # version (1080 px on the longer side covers up to 3× retina on a
+    # 440 px-wide checkin viewport). The original is still served at the
+    # plain URL for callers that need full quality (e.g. the design tab's
+    # iframe). The resize is server-side, cached on disk; first request
+    # generates and saves, subsequent requests serve the cache.
     all_assets: list[dict[str, str]] = [
         {
             "filename": img.get("filename") or img["stored_name"],
-            "url": f"/api/v1/events/{event_id}/files/{img['id']}",
+            "url": f"/api/v1/events/{event_id}/files/{img['id']}?w=1080",
         }
         for img in images_sorted
     ]
@@ -248,7 +258,10 @@ def _load_event_image_refs(
             b64 = base64.b64encode(raw).decode()
             vision_refs.append({
                 "filename": img.get("filename") or img["stored_name"],
-                "url": f"/api/v1/events/{event_id}/files/{img['id']}",
+                # Same `?w=1080` default as the all_assets URL list — the
+                # vision model already saw the image via base64 below, so
+                # this URL is just what gets embedded in HTML.
+                "url": f"/api/v1/events/{event_id}/files/{img['id']}?w=1080",
                 "vision_part": {
                     "type": "image_url",
                     "image_url": {"url": f"data:{mime};base64,{b64}"},
