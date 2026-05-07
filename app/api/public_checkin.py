@@ -238,3 +238,22 @@ async def checkin_stats(
 ):
     """Live check-in stats (polled by the H5 page)."""
     return await checkin_svc.get_checkin_stats(event_id)
+
+
+@router.get("/checkin/page-status")
+async def checkin_page_status(event_id: uuid.UUID):
+    """Filesystem probe: which custom-page artifacts exist for this event.
+
+    The organizer-side design tab uses this to decide whether the preview
+    iframe should target the live URL or ``?preview=staging``. Public so the
+    same iframe (cookie-less) can hit it without JWT plumbing; nothing
+    sensitive — just three booleans.
+    """
+    from pathlib import Path
+
+    base_dir = Path(f"uploads/events/{event_id}")
+    return {
+        "has_live": (base_dir / "checkin_page.html").exists(),
+        "has_staging": (base_dir / "checkin_page_staging.html").exists(),
+        "has_backup": (base_dir / "checkin_page_backup.html").exists(),
+    }
