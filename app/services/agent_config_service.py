@@ -385,169 +385,27 @@ def _apply_llm_overrides() -> None:
         pass
 
 
-# ── Available models catalog ──────────────────────────────────
-# Curated list of models per provider. Shown in the UI as a dropdown
-# so users don't have to memorize model strings.
-
-KNOWN_MODELS: list[dict[str, str]] = [
-    # DeepSeek
-    {
-        "id": "deepseek-chat",
-        "name": "DeepSeek V3",
-        "provider": "deepseek",
-        "tier": "fast",
-        "context": "128K",
-    },
-    {
-        "id": "deepseek-reasoner",
-        "name": "DeepSeek R1",
-        "provider": "deepseek",
-        "tier": "smart",
-        "context": "128K",
-    },
-    # OpenAI
-    {
-        "id": "gpt-4o-mini",
-        "name": "GPT-4o Mini",
-        "provider": "openai",
-        "tier": "fast",
-        "context": "128K",
-    },
-    {
-        "id": "gpt-4o",
-        "name": "GPT-4o",
-        "provider": "openai",
-        "tier": "smart",
-        "context": "128K",
-    },
-    {
-        "id": "gpt-4.1",
-        "name": "GPT-4.1",
-        "provider": "openai",
-        "tier": "smart",
-        "context": "1M",
-    },
-    {
-        "id": "gpt-4.1-mini",
-        "name": "GPT-4.1 Mini",
-        "provider": "openai",
-        "tier": "fast",
-        "context": "1M",
-    },
-    {
-        "id": "gpt-4.1-nano",
-        "name": "GPT-4.1 Nano",
-        "provider": "openai",
-        "tier": "fast",
-        "context": "1M",
-    },
-    {
-        "id": "o3",
-        "name": "O3",
-        "provider": "openai",
-        "tier": "max",
-        "context": "200K",
-    },
-    {
-        "id": "o3-mini",
-        "name": "O3 Mini",
-        "provider": "openai",
-        "tier": "strong",
-        "context": "200K",
-    },
-    {
-        "id": "o4-mini",
-        "name": "O4 Mini",
-        "provider": "openai",
-        "tier": "strong",
-        "context": "200K",
-    },
-    # Anthropic
-    {
-        "id": "claude-sonnet-4-6",
-        "name": "Claude Sonnet 4.6",
-        "provider": "anthropic",
-        "tier": "strong",
-        "context": "200K",
-    },
-    {
-        "id": "claude-opus-4-6",
-        "name": "Claude Opus 4.6",
-        "provider": "anthropic",
-        "tier": "max",
-        "context": "200K",
-    },
-    {
-        "id": "claude-haiku-4-5-20251001",
-        "name": "Claude Haiku 4.5",
-        "provider": "anthropic",
-        "tier": "fast",
-        "context": "200K",
-    },
-    # GLM / 智谱
-    {
-        "id": "glm-4-flash",
-        "name": "GLM-4 Flash",
-        "provider": "glm",
-        "tier": "fast",
-        "context": "128K",
-    },
-    {
-        "id": "glm-4-plus",
-        "name": "GLM-4 Plus",
-        "provider": "glm",
-        "tier": "smart",
-        "context": "128K",
-    },
-    {
-        "id": "glm-4",
-        "name": "GLM-4",
-        "provider": "glm",
-        "tier": "smart",
-        "context": "128K",
-    },
-    # Qwen / 通义千问
-    {
-        "id": "qwen-turbo",
-        "name": "Qwen Turbo",
-        "provider": "qwen",
-        "tier": "fast",
-        "context": "128K",
-    },
-    {
-        "id": "qwen-plus",
-        "name": "Qwen Plus",
-        "provider": "qwen",
-        "tier": "smart",
-        "context": "128K",
-    },
-    {
-        "id": "qwen-max",
-        "name": "Qwen Max",
-        "provider": "qwen",
-        "tier": "strong",
-        "context": "32K",
-    },
-]
+# ── Available-models catalog ──────────────────────────────────
+# Source of truth is now ``app.services.model_catalog`` — it pulls each
+# provider's /v1/models endpoint at request time, merges in display-name
+# overlay + vision-flag inference, caches for 1h. The static list that
+# used to live here was prone to going stale every time a provider shipped
+# a new SKU.
 
 
-def get_available_models() -> dict[str, list[dict[str, str]]]:
-    """Return known models grouped by provider.
+async def get_available_models(
+    refresh: bool = False,
+) -> dict[str, list[dict[str, Any]]]:
+    """Return the model catalog grouped by provider.
 
-    Result format::
+    Args:
+        refresh: bypass the catalog's TTL cache and refetch.
 
-        {
-          "deepseek": [{"id": "deepseek-chat", "name": "DeepSeek V3", ...}],
-          "openai":   [...],
-          "anthropic": [...],
-          "all": [...],   # flat list
-        }
+    Returns:
+        ``{provider: [...], "all": [...]}`` — see model_catalog.get_catalog.
     """
-    by_provider: dict[str, list[dict[str, str]]] = {}
-    for m in KNOWN_MODELS:
-        by_provider.setdefault(m["provider"], []).append(m)
-    by_provider["all"] = KNOWN_MODELS
-    return by_provider
+    from app.services.model_catalog import get_catalog
+    return await get_catalog(refresh=refresh)
 
 
 # ── Helpers for plugins to read their current config ────────────
